@@ -4,180 +4,283 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pre-Cursive Editor — write and print handwriting worksheets</title>
-<meta name="description" content="A word processor for the NTPreCursive handwriting font. Format text, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
-<meta name="theme-color" content="#2f6f92">
+<meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
+<meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/ribbon.css">
 </head>
 <body>
 
-<header class="top">
-  <div class="wrap topbar">
-    <div class="brand">
-      <span class="mark" aria-hidden="true">✍</span>
-      <span><strong>Pre-Cursive Editor</strong><small>write, format, print handwriting</small></span>
-    </div>
-    <button id="themeBtn" class="ghost" type="button" aria-label="Toggle dark mode">◐</button>
+<!-- ===================== ribbon ===================== -->
+<div class="ribbon">
+  <div class="rb-tabs">
+    <button class="rb-tab file" type="button" data-tab="file">File</button>
+    <button class="rb-tab active" type="button" data-tab="home">Home</button>
+    <button class="rb-tab" type="button" data-tab="insert">Insert</button>
+    <button class="rb-tab dim" type="button" disabled>Design</button>
+    <button class="rb-tab" type="button" data-tab="layout">Layout</button>
+    <button class="rb-tab dim" type="button" disabled>References</button>
+    <button class="rb-tab dim" type="button" disabled>Mailings</button>
+    <button class="rb-tab dim" type="button" disabled>Review</button>
+    <button class="rb-tab" type="button" data-tab="view">View</button>
+    <span class="rb-tell">💡 Tell me what you want to do…</span>
+    <span class="rb-right"><button id="themeBtn" class="rb-plain" type="button" title="Light / dark">◐</button></span>
   </div>
-</header>
 
-<main class="wrap app">
-
-  <!-- ---------- toolbar ---------- -->
-  <div class="toolbar card" role="toolbar" aria-label="Formatting">
-    <div class="tgroup">
-      <button class="tb" data-cmd="undo" title="Undo (Ctrl+Z)" type="button">↶</button>
-      <button class="tb" data-cmd="redo" title="Redo (Ctrl+Y)" type="button">↷</button>
-    </div>
-    <span class="tsep"></span>
-    <div class="tgroup">
-      <button class="tb b"   data-cmd="bold"      title="Bold (Ctrl+B)" type="button">B</button>
-      <button class="tb i"   data-cmd="italic"    title="Italic (Ctrl+I)" type="button">I</button>
-      <button class="tb u"   data-cmd="underline" title="Underline (Ctrl+U)" type="button">U</button>
-    </div>
-    <span class="tsep"></span>
-    <div class="tgroup sizebox">
-      <button id="sizeDown" class="tb" title="Smaller" type="button">−</button>
-      <input id="sizeInput" class="tnum" type="number" min="1" max="300" step="1" value="18"
-             title="Text size (1–300)" aria-label="Text size, 1 to 300">
-      <button id="sizeUp" class="tb" title="Larger" type="button">+</button>
-    </div>
-    <div class="tgroup">
-      <button id="colorBtn" class="tb swatch" title="Text colour" type="button">A</button>
-      <input id="colorInput" type="color" value="#1b2129" hidden>
-      <button id="hlBtn" class="tb swatch hl" title="Highlight" type="button">▮</button>
-      <input id="hlInput" type="color" value="#ffe680" hidden>
-    </div>
-    <span class="tsep"></span>
-    <div class="tgroup">
-      <button class="tb" data-cmd="justifyLeft"   title="Align left" type="button">◧</button>
-      <button class="tb" data-cmd="justifyCenter" title="Centre" type="button">◫</button>
-      <button class="tb" data-cmd="justifyRight"  title="Align right" type="button">◨</button>
-      <button class="tb" data-cmd="justifyFull"   title="Justify" type="button">▤</button>
-    </div>
-    <span class="tsep"></span>
-    <div class="tgroup">
-      <button class="tb" data-cmd="insertUnorderedList" title="Bullet list" type="button">•—</button>
-      <button class="tb" data-cmd="insertOrderedList"   title="Numbered list" type="button">1—</button>
-      <button class="tb" data-cmd="outdent" title="Decrease indent" type="button">⇤</button>
-      <button class="tb" data-cmd="indent"  title="Increase indent" type="button">⇥</button>
-    </div>
-    <span class="tsep"></span>
-    <div class="tgroup tablewrap">
-      <button id="tableBtn" class="tb" title="Insert table" type="button">▦</button>
-      <div id="tableMenu" class="popmenu" hidden>
-        <p class="popttl">Insert table</p>
-        <div class="poprow">
-          <label>Rows <input id="tableRows" type="number" min="1" max="12" value="3"></label>
-          <label>Columns <input id="tableCols" type="number" min="1" max="8" value="3"></label>
+  <!-- ---------------- HOME ---------------- -->
+  <div class="rb-panel active" data-panel="home">
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" data-cmd="paste" type="button"><span class="ic">📋</span><span>Paste</span></button>
+        <div class="rb-col">
+          <button class="rb-small" data-cmd="cut" type="button"><span class="ic">✂</span>Cut</button>
+          <button class="rb-small" data-cmd="copy" type="button"><span class="ic">⧉</span>Copy</button>
+          <button class="rb-small" id="fmtPainter" type="button"><span class="ic">🖌</span>Format Painter</button>
         </div>
-        <label class="popchk"><input id="tableHeader" type="checkbox" checked> Header row</label>
-        <button id="tableInsert" class="popbtn" type="button">Insert</button>
       </div>
-      <button id="pageBreakBtn" class="tb" title="Page break" type="button">⤓</button>
+      <div class="rb-label">Clipboard</div>
     </div>
-    <span class="tsep"></span>
-    <div class="tgroup">
-      <button class="tb" data-cmd="removeFormat" title="Clear formatting" type="button">⌫a</button>
+
+    <div class="rb-group">
+      <div class="rb-body rb-rows">
+        <div class="rb-row">
+          <span class="rb-fontname" title="This tool has one font">NT Pre-Cursive</span>
+          <span class="sizebox">
+            <input id="sizeInput" class="tnum" type="number" min="1" max="300" step="1" value="18"
+                   title="Font size (1–300)" aria-label="Font size, 1 to 300">
+          </span>
+          <button class="rb-ic" id="sizeUp" title="Grow font" type="button">A<sup>▴</sup></button>
+          <button class="rb-ic" id="sizeDown" title="Shrink font" type="button">A<sub>▾</sub></button>
+          <button class="rb-ic" id="caseBtn" title="Change case" type="button">Aa</button>
+          <div id="caseMenu" class="popmenu sm" hidden>
+            <button data-case="sentence" type="button">Sentence case.</button>
+            <button data-case="lower" type="button">lowercase</button>
+            <button data-case="upper" type="button">UPPERCASE</button>
+            <button data-case="title" type="button">Capitalise Each Word</button>
+            <button data-case="toggle" type="button">tOGGLE cASE</button>
+          </div>
+          <button class="rb-ic" data-cmd="removeFormat" title="Clear all formatting" type="button">🩹</button>
+        </div>
+        <div class="rb-row">
+          <button class="rb-ic b" data-cmd="bold" title="Bold (Ctrl+B)" type="button">B</button>
+          <button class="rb-ic i" data-cmd="italic" title="Italic (Ctrl+I)" type="button">I</button>
+          <button class="rb-ic u" data-cmd="underline" title="Underline (Ctrl+U)" type="button">U</button>
+          <button class="rb-ic s" data-cmd="strikeThrough" title="Strikethrough" type="button">abc</button>
+          <button class="rb-ic" data-cmd="subscript" title="Subscript" type="button">x<sub>2</sub></button>
+          <button class="rb-ic" data-cmd="superscript" title="Superscript" type="button">x<sup>2</sup></button>
+          <span class="rb-div"></span>
+          <button class="rb-ic swatch hl" id="hlBtn" title="Text highlight colour" type="button">🖍</button>
+          <input id="hlInput" type="color" value="#ffff00" hidden>
+          <button class="rb-ic swatch" id="colorBtn" title="Font colour" type="button">A</button>
+          <input id="colorInput" type="color" value="#c00000" hidden>
+        </div>
+      </div>
+      <div class="rb-label">Font</div>
     </div>
-    <span class="tspacer"></span>
-    <div class="tgroup">
-      <button id="sample" class="ghost sm" type="button">Sample</button>
-      <button id="clear"  class="ghost sm" type="button">Clear</button>
+
+    <div class="rb-group">
+      <div class="rb-body rb-rows">
+        <div class="rb-row">
+          <button class="rb-ic" data-cmd="insertUnorderedList" title="Bullets" type="button">☰•</button>
+          <button class="rb-ic" data-cmd="insertOrderedList" title="Numbering" type="button">☰1</button>
+          <button class="rb-ic" data-cmd="outdent" title="Decrease indent" type="button">⇤</button>
+          <button class="rb-ic" data-cmd="indent" title="Increase indent" type="button">⇥</button>
+          <button class="rb-ic" id="marksBtn" title="Show formatting marks" type="button">¶</button>
+        </div>
+        <div class="rb-row">
+          <button class="rb-ic" data-cmd="justifyLeft" title="Align left" type="button">▤</button>
+          <button class="rb-ic" data-cmd="justifyCenter" title="Centre" type="button">▥</button>
+          <button class="rb-ic" data-cmd="justifyRight" title="Align right" type="button">▦</button>
+          <button class="rb-ic" data-cmd="justifyFull" title="Justify" type="button">▧</button>
+          <span class="rb-div"></span>
+          <button class="rb-ic" id="spacingBtn" title="Line spacing" type="button">↕</button>
+          <div id="spacingMenu" class="popmenu sm" hidden>
+            <button data-sp="1" type="button">1.0</button>
+            <button data-sp="1.15" type="button">1.15</button>
+            <button data-sp="1.5" type="button">1.5</button>
+            <button data-sp="2" type="button">2.0</button>
+            <button data-sp="2.5" type="button">2.5</button>
+            <button data-sp="3" type="button">3.0</button>
+          </div>
+          <button class="rb-ic swatch shade" id="shadeBtn" title="Shading" type="button">▒</button>
+          <input id="shadeInput" type="color" value="#dbe5f1" hidden>
+        </div>
+      </div>
+      <div class="rb-label">Paragraph</div>
+    </div>
+
+    <div class="rb-group grow">
+      <div class="rb-body">
+        <button class="rb-big" data-cmd="undo" type="button"><span class="ic">↶</span><span>Undo</span></button>
+        <button class="rb-big" data-cmd="redo" type="button"><span class="ic">↷</span><span>Redo</span></button>
+      </div>
+      <div class="rb-label">Editing</div>
     </div>
   </div>
 
-  <div class="grid">
-
-    <!-- ---------- editor ---------- -->
-    <section class="card pane">
-      <div class="pane-head">
-        <h2>Document</h2>
-        <span id="stats" class="stats">0 words</span>
+  <!-- ---------------- INSERT ---------------- -->
+  <div class="rb-panel" data-panel="insert">
+    <div class="rb-group">
+      <div class="rb-body">
+        <div class="rb-col">
+          <button class="rb-small" id="coverBtn" type="button"><span class="ic">📄</span>Cover Page</button>
+          <button class="rb-small" id="blankPageBtn" type="button"><span class="ic">▭</span>Blank Page</button>
+          <button class="rb-small" id="pageBreakBtn" type="button"><span class="ic">⤓</span>Page Break</button>
+        </div>
       </div>
-      <div id="editor" class="editor" contenteditable="true" spellcheck="true"
-           aria-label="Document text"><div><br></div></div>
+      <div class="rb-label">Pages</div>
+    </div>
 
-      <div id="notice" class="notice" hidden>
-        <div class="notice-head"><span class="dot"></span><span id="noticeText"></span></div>
-        <div id="noticeDetails" class="chips"></div>
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="tableBtn" type="button"><span class="ic">▦</span><span>Table</span></button>
+        <div id="tableMenu" class="popmenu" hidden>
+          <p class="popttl">Insert table</p>
+          <div class="poprow">
+            <label>Rows <input id="tableRows" type="number" min="1" max="20" value="3"></label>
+            <label>Columns <input id="tableCols" type="number" min="1" max="8" value="3"></label>
+          </div>
+          <label class="popchk"><input id="tableHeader" type="checkbox" checked> Header row</label>
+          <button id="tableInsert" class="popbtn" type="button">Insert</button>
+        </div>
       </div>
+      <div class="rb-label">Tables</div>
+    </div>
 
-      <button id="convert" class="primary" type="button">
-        <span class="label">Convert to NT Pre-Cursive PDF</span>
-        <span class="spin" aria-hidden="true"></span>
-      </button>
-      <p id="status" class="status" role="status" aria-live="polite"></p>
-    </section>
-
-    <!-- ---------- page setup ---------- -->
-    <aside class="card pane">
-      <div class="pane-head"><h2>Page &amp; teaching options</h2></div>
-
-      <div class="opt-grid">
-        <label class="ctl">
-          <span>Paper</span>
-          <select id="pageSize">
-            <option value="a4" selected>A4</option>
-            <option value="letter">Letter</option>
-          </select>
-        </label>
-        <label class="ctl">
-          <span>Orientation</span>
-          <select id="orientation">
-            <option value="portrait" selected>Portrait</option>
-            <option value="landscape">Landscape</option>
-          </select>
-        </label>
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="pictureBtn" type="button"><span class="ic">🖼</span><span>Pictures</span></button>
+        <input id="pictureInput" type="file" accept="image/png,image/jpeg" hidden>
+        <button class="rb-big" id="shapeBtn" type="button"><span class="ic">◇</span><span>Shapes</span></button>
+        <div id="shapeMenu" class="popmenu sm" hidden>
+          <button data-shape="hr" type="button">── Horizontal line</button>
+          <button data-shape="box" type="button">▭ Rectangle</button>
+          <button data-shape="writing" type="button">▤ Writing lines</button>
+        </div>
       </div>
+      <div class="rb-label">Illustrations</div>
+    </div>
 
-      <label class="ctl">
-        <span>Line spacing <b id="spacingVal">1.0×</b></span>
-        <input id="spacing" type="range" min="1" max="3" step="0.1" value="1">
-      </label>
+    <div class="rb-group">
+      <div class="rb-body">
+        <div class="rb-col">
+          <button class="rb-small" id="linkBtn" type="button"><span class="ic">🔗</span>Hyperlink</button>
+          <button class="rb-small" id="unlinkBtn" type="button"><span class="ic">⛓</span>Remove link</button>
+        </div>
+      </div>
+      <div class="rb-label">Links</div>
+    </div>
 
-      <label class="ctl">
-        <span>Margins <b id="marginVal">20mm</b></span>
-        <input id="margin" type="range" min="28" max="113" step="1" value="56">
-      </label>
+    <div class="rb-group">
+      <div class="rb-body">
+        <div class="rb-col">
+          <button class="rb-small" id="headerBtn" type="button"><span class="ic">▔</span>Header</button>
+          <button class="rb-small" id="footerBtn" type="button"><span class="ic">▁</span>Footer</button>
+          <button class="rb-small" id="pageNumBtn" type="button"><span class="ic">#</span>Page Number</button>
+        </div>
+      </div>
+      <div class="rb-label">Header &amp; Footer</div>
+    </div>
 
-      <div class="teach">
-        <p class="teach-title">Teaching aids</p>
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="textBoxBtn" type="button"><span class="ic">🆃</span><span>Text Box</span></button>
+        <div class="rb-col">
+          <button class="rb-small" id="wordArtBtn" type="button"><span class="ic">🅰</span>WordArt</button>
+          <button class="rb-small" id="dropCapBtn" type="button"><span class="ic">🄳</span>Drop Cap</button>
+          <button class="rb-small" id="dateBtn" type="button"><span class="ic">📅</span>Date &amp; Time</button>
+        </div>
+      </div>
+      <div class="rb-label">Text</div>
+    </div>
 
-        <label class="ctl check">
-          <input id="rules" type="checkbox">
-          <span><b>Guide lines</b><small>Ascender, x-height, baseline and descender rules under every line</small></span>
-        </label>
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="symbolBtn" type="button"><span class="ic">Ω</span><span>Symbol</span></button>
+        <div id="symbolMenu" class="popmenu wide" hidden>
+          <p class="popttl">Symbols this font can draw</p>
+          <div id="symbolGrid" class="symgrid"></div>
+        </div>
+      </div>
+      <div class="rb-label">Symbols</div>
+    </div>
+  </div>
 
-        <label class="ctl check">
-          <input id="tracing" type="checkbox">
-          <span><b>Tracing outline</b><small>Hollow letters for pupils to trace over — Word cannot do this</small></span>
-        </label>
+  <!-- ---------------- LAYOUT ---------------- -->
+  <div class="rb-panel" data-panel="layout">
+    <div class="rb-group">
+      <div class="rb-body rb-rows">
+        <div class="rb-row">
+          <label class="rb-field">Paper
+            <select id="pageSize"><option value="a4" selected>A4</option><option value="letter">Letter</option></select>
+          </label>
+          <label class="rb-field">Orientation
+            <select id="orientation"><option value="portrait" selected>Portrait</option><option value="landscape">Landscape</option></select>
+          </label>
+        </div>
+        <div class="rb-row">
+          <label class="rb-field wide">Margins <b id="marginVal">20mm</b>
+            <input id="margin" type="range" min="28" max="113" step="1" value="56">
+          </label>
+          <label class="rb-field wide">Line spacing <b id="spacingVal">1.0×</b>
+            <input id="spacing" type="range" min="1" max="3" step="0.1" value="1">
+          </label>
+        </div>
+      </div>
+      <div class="rb-label">Page Setup</div>
+    </div>
+  </div>
 
-        <label class="ctl check">
-          <input id="worksheet" type="checkbox">
-          <span><b>Worksheet header</b><small>Name and date rules across the top of each page</small></span>
-        </label>
-
-        <div id="wsFields" hidden>
-          <label class="ctl">
-            <span>Worksheet title</span>
+  <!-- ---------------- VIEW / teaching aids ---------------- -->
+  <div class="rb-panel" data-panel="view">
+    <div class="rb-group">
+      <div class="rb-body rb-rows">
+        <div class="rb-row">
+          <label class="rb-chk"><input id="rules" type="checkbox"> Guide lines</label>
+          <label class="rb-chk"><input id="tracing" type="checkbox"> Tracing outline</label>
+          <label class="rb-chk"><input id="worksheet" type="checkbox"> Worksheet header</label>
+        </div>
+        <div class="rb-row">
+          <label class="rb-field wide">Worksheet title
             <input id="wsName" type="text" placeholder="e.g. Week 3 — letter families" class="tinput">
           </label>
         </div>
       </div>
-
-      <p class="hint">Everything is saved in your browser automatically, and your
-      text never leaves this device.</p>
-    </aside>
-
+      <div class="rb-label">Teaching aids</div>
+    </div>
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="sample" type="button"><span class="ic">📝</span><span>Sample</span></button>
+        <button class="rb-big" id="clear" type="button"><span class="ic">🗑</span><span>Clear</span></button>
+      </div>
+      <div class="rb-label">Document</div>
+    </div>
   </div>
+</div>
+
+<!-- ===================== document ===================== -->
+<main class="stage">
+  <div id="editor" class="editor page" contenteditable="true" spellcheck="true"
+       aria-label="Document text"><div><br></div></div>
 </main>
 
-<footer class="wrap foot">
-  <p>Runs entirely in your browser — nothing is uploaded.</p>
-  <p class="fine">Pre-Cursive typeface © 2003 Thomas Nelson &amp; Sons Ltd. · <span id="year"></span></p>
+<!-- ===================== status bar ===================== -->
+<footer class="statusbar">
+  <span id="stats">0 words</span>
+  <span id="notice" class="notice" hidden>
+    <span class="dot"></span><span id="noticeText"></span>
+    <span id="noticeDetails" class="chips"></span>
+  </span>
+  <span class="sb-right">
+    <span id="status" class="status" role="status" aria-live="polite"></span>
+    <button id="convert" class="primary" type="button">
+      <span class="label">Convert to NT Pre-Cursive PDF</span>
+      <span class="spin" aria-hidden="true"></span>
+    </button>
+  </span>
 </footer>
+<span id="year" hidden></span>
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
@@ -188,13 +291,24 @@
 <script src="js/app.js"></script>
 <script>
 (function () {
-  const b = document.getElementById('themeBtn');
-  const saved = localStorage.getItem('pc-theme');
+  // ribbon tab switching
+  document.querySelectorAll('.rb-tab[data-tab]').forEach(function (t) {
+    t.addEventListener('click', function () {
+      if (t.dataset.tab === 'file') return;
+      document.querySelectorAll('.rb-tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.rb-panel').forEach(x => x.classList.remove('active'));
+      t.classList.add('active');
+      var p = document.querySelector('.rb-panel[data-panel="' + t.dataset.tab + '"]');
+      if (p) p.classList.add('active');
+    });
+  });
+  var b = document.getElementById('themeBtn');
+  var saved = localStorage.getItem('pc-theme');
   if (saved) document.documentElement.dataset.theme = saved;
   b.addEventListener('click', function () {
-    const cur = document.documentElement.dataset.theme
+    var cur = document.documentElement.dataset.theme
       || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-    const next = cur === 'dark' ? 'light' : 'dark';
+    var next = cur === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     localStorage.setItem('pc-theme', next);
   });

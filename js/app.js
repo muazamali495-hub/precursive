@@ -11,11 +11,15 @@
 
   const $ = s => document.querySelector(s);
   const el = {};
-  ['editor','convert','sizeSel','pageSize','orientation','rules','tracing','worksheet',
+  ['editor','convert','pageSize','orientation','rules','tracing','worksheet',
    'spacing','spacingVal','margin','marginVal','notice','noticeText','noticeDetails',
-   'stats','sample','clear','status','year','colorBtn','colorInput','wsName','wsFields',
+   'stats','sample','clear','status','year','colorBtn','colorInput','wsName',
    'sizeInput','sizeUp','sizeDown','hlBtn','hlInput','tableBtn','tableMenu','tableRows',
-   'tableCols','tableHeader','tableInsert','pageBreakBtn']
+   'tableCols','tableHeader','tableInsert','pageBreakBtn','shadeBtn','shadeInput',
+   'caseBtn','caseMenu','spacingBtn','spacingMenu','marksBtn','fmtPainter',
+   'blankPageBtn','coverBtn','pictureBtn','pictureInput','shapeBtn','shapeMenu',
+   'linkBtn','unlinkBtn','headerBtn','footerBtn','pageNumBtn','textBoxBtn',
+   'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -83,15 +87,32 @@
     /* Size: any value from 1 to 300. execCommand's fontSize only accepts the
        legacy 1-7 scale, so tag the selection with size 7 and immediately
        rewrite those <font> tags to a real pixel size. */
+    /* With styleWithCSS ON, execCommand('fontSize') emits
+     *   <span style="font-size: xxx-large">
+     * rather than <font size="7">, so any rewrite that looks for font tags
+     * silently finds nothing and the size never reaches the PDF. Turn
+     * styleWithCSS OFF for the duration of the call so we reliably get
+     * <font size="7">, swap those for a real pixel size, then restore it.
+     */
     const applySize = px => {
       px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
       el.sizeInput.value = px;
       el.editor.focus();
+
+      let prev = true;
+      try { prev = document.queryCommandState('styleWithCSS'); } catch (e) {}
+      try { document.execCommand('styleWithCSS', false, false); } catch (e) {}
       document.execCommand('fontSize', false, '7');
-      el.editor.querySelectorAll('font[size="7"]').forEach(f => {
+      try { document.execCommand('styleWithCSS', false, prev); } catch (e) {}
+
+      const tagged = el.editor.querySelectorAll('font[size="7"], span[style*="xxx-large"]');
+      tagged.forEach(f => {
         const s = document.createElement('span');
         s.style.fontSize = px + 'px';
         while (f.firstChild) s.appendChild(f.firstChild);
+        // a nested size would win over the one we just set
+        s.querySelectorAll('[style*="font-size"]').forEach(n => n.style.fontSize = '');
+        s.querySelectorAll('font[size]').forEach(n => n.removeAttribute('size'));
         f.replaceWith(s);
       });
       refresh(); scheduleSave();
@@ -114,6 +135,115 @@
       exec('hiliteColor', el.hlInput.value);
     });
 
+    el.shadeBtn.addEventListener('click', () => el.shadeInput.click());
+    el.shadeInput.addEventListener('input', () => {
+      el.shadeBtn.style.setProperty('--swatch', el.shadeInput.value);
+      applyToBlock(b => b.style.backgroundColor = el.shadeInput.value);
+    });
+
+    /* --- change case --- */
+    popToggle(el.caseBtn, el.caseMenu);
+    el.caseMenu.querySelectorAll('[data-case]').forEach(b =>
+      b.addEventListener('click', () => { changeCase(b.dataset.case); el.caseMenu.hidden = true; }));
+
+    /* --- line spacing --- */
+    popToggle(el.spacingBtn, el.spacingMenu);
+    el.spacingMenu.querySelectorAll('[data-sp]').forEach(b =>
+      b.addEventListener('click', () => {
+        el.spacing.value = b.dataset.sp;
+        el.spacing.dispatchEvent(new Event('input', { bubbles: true }));
+        el.spacingMenu.hidden = true;
+      }));
+
+    /* --- formatting marks (editor-only) --- */
+    el.marksBtn.addEventListener('click', () => {
+      el.marksBtn.classList.toggle('on');
+      el.editor.classList.toggle('marks', el.marksBtn.classList.contains('on'));
+    });
+
+    /* --- format painter --- */
+    el.fmtPainter.addEventListener('click', () => {
+      if (painter) { painter = null; el.fmtPainter.classList.remove('on'); return; }
+      painter = capturedStyle();
+      el.fmtPainter.classList.toggle('on', !!painter);
+    });
+    el.editor.addEventListener('mouseup', () => {
+      if (!painter) return;
+      applyCaptured(painter);
+      painter = null; el.fmtPainter.classList.remove('on');
+    });
+
+    /* --- Insert: pages --- */
+    el.blankPageBtn.addEventListener('click', () =>
+      insertHTML('<hr class="pgbreak"><div><br></div><hr class="pgbreak"><div><br></div>'));
+    el.coverBtn.addEventListener('click', () => insertHTML(
+      '<div style="text-align:center"><span style="font-size:44px"><b>Title</b></span></div>' +
+      '<div style="text-align:center"><span style="font-size:22px">Subtitle</span></div>' +
+      '<div><br></div><div style="text-align:center">Name &nbsp;&nbsp; Date</div>' +
+      '<hr class="pgbreak"><div><br></div>'));
+    el.pageBreakBtn.addEventListener('click', () =>
+      insertHTML('<hr class="pgbreak"><div><br></div>'));
+
+    /* --- Insert: pictures --- */
+    el.pictureBtn.addEventListener('click', () => el.pictureInput.click());
+    el.pictureInput.addEventListener('change', () => {
+      const f = el.pictureInput.files && el.pictureInput.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        insertHTML('<div><img src="' + rd.result + '" alt=""></div><div><br></div>');
+      };
+      rd.readAsDataURL(f);
+      el.pictureInput.value = '';
+    });
+
+    /* --- Insert: shapes --- */
+    popToggle(el.shapeBtn, el.shapeMenu);
+    el.shapeMenu.querySelectorAll('[data-shape]').forEach(b =>
+      b.addEventListener('click', () => {
+        const s = b.dataset.shape;
+        if (s === 'hr') insertHTML('<hr class="rule"><div><br></div>');
+        if (s === 'box') insertHTML('<div class="textbox"><br></div><div><br></div>');
+        if (s === 'writing') insertHTML('<hr class="writinglines"><div><br></div>');
+        el.shapeMenu.hidden = true;
+      }));
+
+    /* --- Insert: links --- */
+    el.linkBtn.addEventListener('click', () => {
+      const url = prompt('Link address:', 'https://');
+      if (url) exec('createLink', url);
+    });
+    el.unlinkBtn.addEventListener('click', () => exec('unlink'));
+
+    /* --- Insert: header / footer / page number --- */
+    el.headerBtn.addEventListener('click', () => {
+      el.worksheet.checked = true;
+      el.worksheet.dispatchEvent(new Event('change', { bubbles: true }));
+      switchTab('view');
+      el.wsName.focus();
+    });
+    el.footerBtn.addEventListener('click', () => { pageNumbers = true; setStatus('Footer page numbers on'); refresh(); });
+    el.pageNumBtn.addEventListener('click', () => {
+      pageNumbers = !pageNumbers;
+      el.pageNumBtn.classList.toggle('on', pageNumbers);
+      setStatus(pageNumbers ? 'Page numbers on' : 'Page numbers off');
+      refresh(); scheduleSave();
+    });
+
+    /* --- Insert: text --- */
+    el.textBoxBtn.addEventListener('click', () =>
+      insertHTML('<div class="textbox">Text box</div><div><br></div>'));
+    el.wordArtBtn.addEventListener('click', () =>
+      insertHTML('<div class="wordart">WordArt</div><div><br></div>'));
+    el.dropCapBtn.addEventListener('click', () => applyToBlock(b => b.classList.toggle('dropcap')));
+    el.dateBtn.addEventListener('click', () => {
+      const d = new Date();
+      insertHTML(d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }));
+    });
+
+    /* --- Insert: symbols (only what this font can actually draw) --- */
+    popToggle(el.symbolBtn, el.symbolMenu, buildSymbolGrid);
+
     el.tableBtn.addEventListener('click', () => el.tableMenu.hidden = !el.tableMenu.hidden);
     el.tableInsert.addEventListener('click', () => {
       insertTable(Math.max(1, Math.min(12, +el.tableRows.value || 2)),
@@ -130,6 +260,115 @@
       document.execCommand('insertHTML', false, '<hr class="pgbreak"><div><br></div>');
       refresh(); scheduleSave();
     });
+  }
+
+  /* ---------- ribbon helpers ---------- */
+  let painter = null, pageNumbers = false;
+
+  function insertHTML(html) {
+    el.editor.focus();
+    document.execCommand('insertHTML', false, html);
+    refresh(); scheduleSave();
+  }
+
+  function popToggle(btn, menu, onOpen) {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const opening = menu.hidden;
+      document.querySelectorAll('.popmenu').forEach(m => m.hidden = true);
+      menu.hidden = !opening;
+      if (opening && onOpen) onOpen();
+    });
+    menu.addEventListener('click', e => e.stopPropagation());
+  }
+  document.addEventListener('click', () =>
+    document.querySelectorAll('.popmenu').forEach(m => m.hidden = true));
+
+  function switchTab(name) {
+    const t = document.querySelector('.rb-tab[data-tab="' + name + '"]');
+    if (t) t.click();
+  }
+
+  /* The block element containing the caret — used by shading and drop cap. */
+  function currentBlock() {
+    const sel = getSelection();
+    if (!sel.rangeCount) return null;
+    let n = sel.getRangeAt(0).startContainer;
+    if (n.nodeType === 3) n = n.parentNode;
+    while (n && n !== el.editor && !/^(DIV|P|LI|H1|H2|H3|TD|TH)$/.test(n.tagName)) n = n.parentNode;
+    return n === el.editor ? null : n;
+  }
+  function applyToBlock(fn) {
+    const b = currentBlock();
+    if (!b) { setStatus('Put the cursor in a paragraph first'); return; }
+    fn(b); refresh(); scheduleSave();
+  }
+
+  function changeCase(mode) {
+    const sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) { setStatus('Select some text first'); return; }
+    const text = sel.toString();
+    let out = text;
+    if (mode === 'upper') out = text.toUpperCase();
+    else if (mode === 'lower') out = text.toLowerCase();
+    else if (mode === 'title') out = text.replace(/\b\w/g, c => c.toUpperCase());
+    else if (mode === 'sentence') out = text.toLowerCase().replace(/(^\s*\w|[.!?]\s+\w)/g, c => c.toUpperCase());
+    else if (mode === 'toggle') out = [...text].map(c =>
+      c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()).join('');
+    el.editor.focus();
+    document.execCommand('insertText', false, out);
+    refresh(); scheduleSave();
+  }
+
+  /* Format painter: remember the styling at the caret, then re-apply it. */
+  function capturedStyle() {
+    const b = currentBlock();
+    const sel = getSelection();
+    if (!sel.rangeCount) return null;
+    let n = sel.getRangeAt(0).startContainer;
+    if (n.nodeType === 3) n = n.parentNode;
+    const cs = getComputedStyle(n);
+    return {
+      bold: +cs.fontWeight >= 600, italic: cs.fontStyle === 'italic',
+      underline: cs.textDecorationLine.includes('underline'),
+      size: Math.round(parseFloat(cs.fontSize)), color: cs.color,
+      align: b ? (b.style.textAlign || 'left') : null
+    };
+  }
+  function applyCaptured(st) {
+    if (!st) return;
+    const sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) return;
+    el.editor.focus();
+    document.execCommand('removeFormat');
+    if (st.bold) document.execCommand('bold');
+    if (st.italic) document.execCommand('italic');
+    if (st.underline) document.execCommand('underline');
+    if (st.color) document.execCommand('foreColor', false, st.color);
+    if (st.size) { el.sizeInput.value = st.size; el.sizeInput.dispatchEvent(new Event('change', { bubbles: true })); }
+    if (st.align) {
+      const b = currentBlock();
+      if (b) b.style.textAlign = st.align;
+    }
+    refresh(); scheduleSave();
+  }
+
+  /* Only offer symbols the font can actually draw — the tofu set is excluded. */
+  function buildSymbolGrid() {
+    if (el.symbolGrid.childElementCount) return;
+    const cps = [];
+    for (const [cp] of FONT.CMAP) if (FONT.usable(cp) && cp > 32) cps.push(cp);
+    cps.sort((a, b) => a - b);
+    el.symbolGrid.innerHTML = cps.map(cp =>
+      '<button type="button" data-cp="' + cp + '" title="U+' +
+      cp.toString(16).toUpperCase().padStart(4, '0') + '">' +
+      String.fromCodePoint(cp).replace('&', '&amp;').replace('<', '&lt;') + '</button>').join('');
+    el.symbolGrid.querySelectorAll('button').forEach(b =>
+      b.addEventListener('click', () => {
+        el.editor.focus();
+        document.execCommand('insertText', false, String.fromCodePoint(+b.dataset.cp));
+        el.symbolMenu.hidden = true; refresh(); scheduleSave();
+      }));
   }
 
   const MIN_SIZE = 1, MAX_SIZE = 300;
@@ -225,7 +464,6 @@
     el.marginVal.textContent = Math.round(+el.margin.value / 2.835) + 'mm';
     el.editor.classList.toggle('tracing', el.tracing.checked);
     el.editor.style.setProperty('--ls', el.spacing.value);
-    el.wsFields.hidden = !el.worksheet.checked;
     el.convert.disabled = !text.trim();
   }
 
@@ -306,6 +544,19 @@
       const flowOpts = Object.assign({}, o, { marginTop: o.marginTop + wsTop });
       const pages = NTLayout.flow(FONT, doc, flowOpts);
 
+      // embed every distinct image once
+      const imgCache = new Map();
+      for (const pg of pages) for (const it of pg) {
+        if (it.kind !== 'image' || imgCache.has(it.src)) continue;
+        try {
+          const b64 = String(it.src).split(',')[1];
+          const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const isPng = String(it.src).slice(0, 20).toLowerCase().indexOf('image/png') > 0;
+          imgCache.set(it.src, isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes));
+        } catch (err) { console.warn('image skipped:', err.message); imgCache.set(it.src, null); }
+      }
+
       pages.forEach((lines, pi) => {
         const page = pdf.addPage([o.pageW, o.pageH]);
         page.node.setFontDictionary(P.PDFName.of(KEY), font.ref);
@@ -314,6 +565,31 @@
         if (worksheet) drawWorksheetHeader(P, page, font, KEY, o);
 
         for (const item of lines) {
+          if (item.kind === 'image') {
+            const img = imgCache.get(item.src);
+            if (img) page.drawImage(img, { x: o.marginL + item.x, y: top - item.y - item.h,
+                                           width: item.w, height: item.h });
+            continue;
+          }
+          if (item.kind === 'rule') {
+            const x1 = o.marginL, x2 = o.pageW - o.marginR;
+            const ops = [P.pushGraphicsState()];
+            if (item.variant === 'writinglines') {
+              for (let k = 0; k < item.count; k++) {
+                const yy = top - item.y - (k + 1) * item.gap;
+                ops.push(P.setLineWidth(k % 2 ? 0.5 : 0.8),
+                         P.setStrokingRgbColor(k % 2 ? 0.62 : 0.50, k % 2 ? 0.78 : 0.70, k % 2 ? 0.90 : 0.87),
+                         P.moveTo(x1, yy), P.lineTo(x2, yy), P.stroke());
+              }
+            } else {
+              const yy = top - item.y - item.h / 2;
+              ops.push(P.setLineWidth(0.8), P.setStrokingRgbColor(0.45, 0.5, 0.56),
+                       P.moveTo(x1, yy), P.lineTo(x2, yy), P.stroke());
+            }
+            ops.push(P.popGraphicsState());
+            page.pushOperators(...ops);
+            continue;
+          }
           if (item.kind === 'row') {
             drawTableRow(P, page, font, KEY, o, item.row, top - item.y, tracing);
             continue;
@@ -321,6 +597,14 @@
           const ln = item.line;
           const baseY = top - ln.y;
 
+          if (ln.shade) {
+            const c = NTEditor.rgbToArr(ln.shade);
+            page.pushOperators(
+              P.pushGraphicsState(), P.setFillingRgbColor(c[0], c[1], c[2]),
+              P.moveTo(o.marginL, baseY - ln.descent), P.lineTo(o.pageW - o.marginR, baseY - ln.descent),
+              P.lineTo(o.pageW - o.marginR, baseY + ln.ascent), P.lineTo(o.marginL, baseY + ln.ascent),
+              P.closePath(), P.fill(), P.popGraphicsState());
+          }
           if (showRules) drawRules(P, page, o, baseY, ln);
 
           if (ln.listMark) {
@@ -329,7 +613,7 @@
           }
           drawLineItems(P, page, font, KEY, ln, o.marginL, baseY, tracing);
         }
-        if (pages.length > 1) drawPageNumber(P, page, font, KEY, o, pi + 1, pages.length);
+        if (pageNumbers || pages.length > 1) drawPageNumber(P, page, font, KEY, o, pi + 1, pages.length);
       });
 
       const bytes = await pdf.save();
@@ -359,7 +643,17 @@
           P.lineTo(x - 1, baseY + it.style.size * 0.72),
           P.closePath(), P.fill(), P.popGraphicsState());
       }
-      drawRun(P, page, font, KEY, it.text, it.style, x, baseY, tracing);
+      const sub = it.style.sub, sup = it.style.sup;
+      const dy = sub ? -it.style.size * 0.18 : sup ? it.style.size * 0.34 : 0;
+      drawRun(P, page, font, KEY, it.text, it.style, x, baseY + dy, tracing);
+      if (it.style.strike) {
+        const c2 = NTEditor.rgbToArr(it.style.color);
+        const sy = baseY + dy + it.style.size * 0.22;
+        page.pushOperators(
+          P.pushGraphicsState(), P.setStrokingRgbColor(c2[0], c2[1], c2[2]),
+          P.setLineWidth(Math.max(0.5, it.style.size * 0.045)),
+          P.moveTo(x, sy), P.lineTo(x + it.w, sy), P.stroke(), P.popGraphicsState());
+      }
       if (it.style.u) {
         const th = Math.max(0.5, it.style.size * 0.045);
         const uy = baseY - it.style.size * 0.10;
@@ -405,7 +699,8 @@
   /* Draw one styled run. Bold and italic are synthesised because the font
      ships a single style — see layout.js. */
   function drawRun(P, page, font, KEY, text, style, x, y, tracing) {
-    const size = style.size || NTEditor.DEFAULT_SIZE;
+    let size = style.size || NTEditor.DEFAULT_SIZE;
+    if (style.sub || style.sup) size *= NTLayout.SUBSUP;
     const c = NTEditor.rgbToArr(style.color);
     const ops = [P.pushGraphicsState()];
 

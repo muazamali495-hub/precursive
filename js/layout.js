@@ -17,8 +17,11 @@
   const BOLD_STROKE = 0.030;   // stroke width as a fraction of font size
   const ITALIC_SKEW = 0.2126;  // tan(12deg)
 
+  const SUBSUP = 0.66;   // sub/superscript draw at this fraction of the size
+
   function runWidth(font, text, style) {
-    const S = style.size / font.UPEM;
+    const eff = (style.sub || style.sup) ? style.size * SUBSUP : style.size;
+    const S = eff / font.UPEM;
     let w = 0, prev = -1;
     for (const ch of text) {
       const g = font.gid(ch.codePointAt(0));
@@ -198,6 +201,23 @@
         continue;
       }
 
+      if (block && block.type === 'image') {
+        // scale to fit the column, converting CSS px to points
+        const natW = (block.w || 400) * 0.75, natH = (block.h || 300) * 0.75;
+        const w = Math.min(colW, natW), h = natH * (w / (natW || 1));
+        if (y + h > usableH && page.length) newPage();
+        page.push({ kind: 'image', src: block.src, x: 0, w: w, h: h, y: y });
+        y += h + 6;
+        continue;
+      }
+      if (block && (block.type === 'rule' || block.type === 'writinglines')) {
+        const n = block.type === 'writinglines' ? 4 : 1;
+        const gap = 26, h = n === 1 ? 14 : n * gap;
+        if (y + h > usableH && page.length) newPage();
+        page.push({ kind: 'rule', variant: block.type, y: y, h: h, gap: gap, count: n });
+        y += h + 6;
+        continue;
+      }
       if (block && block.type === 'table') {
         const rows = layoutTable(font, block, colW, opts);
         for (const row of rows) {
@@ -232,7 +252,7 @@
   }
 
   global.NTLayout = {
-    runWidth, layoutParagraph, layoutTable, positionLine, flow,
+    runWidth, layoutParagraph, layoutTable, positionLine, flow, SUBSUP,
     BOLD_STROKE, ITALIC_SKEW
   };
 })(window);
