@@ -61,6 +61,7 @@
    * Returns [{ items:[{text,style,x,w}], width, ascent, descent, first }]
    */
   function layoutParagraph(font, para, colW, opts) {
+    if (!para || !para.runs) para = { align: 'left', runs: [{ text: '', size: opts.baseSize }] };
     const indent = (para.level || 0) * (opts.indentPt || 24);
     const listMark = bulletFor(para, opts.listIndex || 1);
     const markStyle = para.runs[0] || { size: opts.baseSize, b: false, i: false };
@@ -144,6 +145,27 @@
     return line;
   }
 
+  /* A table cell or text box may itself contain a table, another box, an image
+     or a page break. Those cannot be laid out recursively inside a cell, so
+     flatten them to plain paragraphs: the text still prints instead of the
+     whole export failing. */
+  function flattenNested(blocks, baseSize) {
+    const out = [];
+    for (const b of blocks || []) {
+      if (!b) continue;
+      if (!b.type) { out.push(b); continue; }
+      if (b.type === 'textbox') { out.push(...flattenNested(b.paras, baseSize)); continue; }
+      if (b.type === 'table') {
+        for (const row of b.rows || [])
+          for (const cell of row || [])
+            out.push(...flattenNested(cell && cell.paras, baseSize));
+        continue;
+      }
+      // image, page break, rule and writing lines have no text to salvage
+    }
+    return out.length ? out : [{ align: 'left', runs: [{ text: '', size: baseSize }] }];
+  }
+
   /* ---------- tables ----------
    * Columns split the text width equally. Each cell holds its own paragraphs,
    * laid out inside (cellWidth - 2*padding). A row is as tall as its tallest
@@ -162,8 +184,7 @@
       let tallest = 0;
       for (let c = 0; c < n; c++) {
         const src = row[c] || { paras: [] };
-        const paras = src.paras && src.paras.length ? src.paras
-                    : [{ align: 'left', runs: [{ text: '', size: opts.baseSize }] }];
+        const paras = flattenNested(src.paras, opts.baseSize);
         let lines = [], h = 0;
         for (const para of paras) {
           const ls = layoutParagraph(font, para, inner, opts);
@@ -206,7 +227,7 @@
         const w = Math.min(colW, block.w || colW);
         const inner = Math.max(20, w - pad * 2);
         let lines = [], ch = 0;
-        for (const para of block.paras) {
+        for (const para of flattenNested(block.paras, opts.baseSize)) {
           const ls = layoutParagraph(font, para, inner, opts);
           for (let i = 0; i < ls.length; i++) {
             positionLine(ls[i], inner, para.align || 'left', i === ls.length - 1);
@@ -273,7 +294,7 @@
   }
 
   global.NTLayout = {
-    runWidth, layoutParagraph, layoutTable, positionLine, flow, SUBSUP,
+    runWidth, layoutParagraph, layoutTable, positionLine, flow, flattenNested, SUBSUP,
     BOLD_STROKE, ITALIC_SKEW
   };
 })(window);

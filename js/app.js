@@ -702,7 +702,14 @@
   }
 
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-  function setStatus(m, err) { el.status.textContent = m || ''; el.status.classList.toggle('err', !!err); }
+  let statusIsError = false;
+  function setStatus(m, err) {
+    // an error must not be wiped by the next autosave toast
+    if (statusIsError && !err && m === 'Saved') return;
+    statusIsError = !!err;
+    el.status.textContent = m || '';
+    el.status.classList.toggle('err', !!err);
+  }
 
   /* ---------- autosave ---------- */
   function scheduleSave() {
@@ -888,7 +895,7 @@
                 ', ' + Math.round(bytes.length / 1024) + ' KB');
     } catch (e) {
       console.error(e);
-      setStatus('Something went wrong: ' + e.message, true);
+      setStatus('Could not build the PDF: ' + e.message, true);
     } finally {
       el.convert.classList.remove('busy'); el.convert.disabled = false;
     }
