@@ -9,6 +9,79 @@
   };
   const SAVE_KEY = 'precursive-doc-v2';
 
+  /* Autosave used to write straight to localStorage, which caps at roughly
+     5 MB. A few embedded photos pass that easily and setItem throws
+     QuotaExceededError, which was swallowed — the teacher's work vanished on
+     reload with no warning. IndexedDB has a far larger quota and is tried
+     first; localStorage remains the fallback for browsers without it. If both
+     refuse, the user is told rather than left to discover it later. */
+  const STORE = (function () {
+    const DB_NAME = 'precursive', STORE_NAME = 'docs', KEY = 'doc-v2';
+    let dbPromise = null;
+    function open() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((res, rej) => {
+        let req;
+        try { req = indexedDB.open(DB_NAME, 1); } catch (e) { return rej(e); }
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME);
+        };
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      }).catch(() => null);
+      return dbPromise;
+    }
+    return {
+      async save(json) {
+        const db = await open();
+        if (db) {
+          try {
+            await new Promise((res, rej) => {
+              const tx = db.transaction(STORE_NAME, 'readwrite');
+              tx.objectStore(STORE_NAME).put(json, KEY);
+              tx.oncomplete = res;
+              tx.onerror = () => rej(tx.error);
+              tx.onabort = () => rej(tx.error || new Error('aborted'));
+            });
+            try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+            return { ok: true, where: 'indexeddb', bytes: json.length };
+          } catch (e) { /* fall through to localStorage */ }
+        }
+        try {
+          localStorage.setItem(SAVE_KEY, json);
+          return { ok: true, where: 'localstorage', bytes: json.length };
+        } catch (e) {
+          return { ok: false, error: e, bytes: json.length };
+        }
+      },
+      async load() {
+        const db = await open();
+        if (db) {
+          try {
+            const v = await new Promise((res, rej) => {
+              const tx = db.transaction(STORE_NAME, 'readonly');
+              const rq = tx.objectStore(STORE_NAME).get(KEY);
+              rq.onsuccess = () => res(rq.result);
+              rq.onerror = () => rej(rq.error);
+            });
+            if (v) return v;
+          } catch (e) {}
+        }
+        try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; }
+      }
+    };
+  })();
+
+  /* Images are what push a document past any quota, so a failed save is
+     retried without them: the words survive even if the pictures cannot. */
+  function stripImages(html) {
+    const t = document.createElement('div');
+    t.innerHTML = html;
+    const imgs = t.querySelectorAll('img');
+    imgs.forEach(im => { im.removeAttribute('src'); im.setAttribute('data-dropped', '1'); });
+    return { html: t.innerHTML, dropped: imgs.length };
+  }
+
   const $ = s => document.querySelector(s);
   const el = {};
   ['editor','convert','pageSize','orientation','rules','tracing','worksheet',
@@ -48,7 +121,7 @@
 
     wireToolbar();
     wireTextBoxes();
-    restore();
+    restore();   // async; refreshes when done
 
     el.editor.addEventListener('input', () => { refresh(); scheduleSave(); });
     el.editor.addEventListener('keyup', syncToolbarState);
@@ -672,45 +745,80 @@
   }
 
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-  let statusIsError = false;
-  function setStatus(m, err) {
-    // an error must not be wiped by the next autosave toast
-    if (statusIsError && !err && m === 'Saved') return;
-    statusIsError = !!err;
+  let stickyError = false;
+  function setStatus(m, err, sticky) {
+    // a *build* error must survive the routine "Saved" toast; a storage-save
+    // error is not sticky, so a later successful save clears it
+    if (stickyError && !err && m === 'Saved') return;
+    stickyError = !!err && !!sticky;
     el.status.textContent = m || '';
     el.status.classList.toggle('err', !!err);
   }
 
   /* ---------- autosave ---------- */
-  function scheduleSave() {
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      try {
-        localStorage.setItem(SAVE_KEY, JSON.stringify({
-          html: el.editor.innerHTML,
-          page: el.pageSize.value, orient: el.orientation.value,
-          rules: el.rules.checked, tracing: el.tracing.checked,
-          worksheet: el.worksheet.checked, spacing: el.spacing.value,
-          margin: el.margin.value, wsName: el.wsName.value,
-          headerHTML: el.pageHeader.innerHTML, footerHTML: el.pageFooter.innerHTML,
-          headerText: el.headerText.value, headerAlign: el.headerAlign.value,
-          headerSize: el.headerSize.value, headerRule: el.headerRule.checked,
-          footerText: el.footerText.value, footerAlign: el.footerAlign.value,
-          footerSize: el.footerSize.value, pageNumbers: pageNumbers, at: Date.now()
-        }));
-        if (!/^Done/.test(el.status.textContent)) {
-          setStatus('Saved');
-          setTimeout(() => { if (el.status.textContent === 'Saved') setStatus(''); }, 1400);
-        }
-      } catch (e) {}
-    }, 600);
+  let saveWarned = false;
+
+  function snapshot(html) {
+    return {
+      html: html,
+      headerHTML: el.pageHeader.innerHTML, footerHTML: el.pageFooter.innerHTML,
+      page: el.pageSize.value, orient: el.orientation.value,
+      rules: el.rules.checked, tracing: el.tracing.checked,
+      worksheet: el.worksheet.checked, spacing: el.spacing.value,
+      margin: el.margin.value, wsName: el.wsName.value,
+      headerText: el.headerText.value, headerAlign: el.headerAlign.value,
+      headerSize: el.headerSize.value, headerRule: el.headerRule.checked,
+      footerText: el.footerText.value, footerAlign: el.footerAlign.value,
+      footerSize: el.footerSize.value, pageNumbers: pageNumbers, at: Date.now()
+    };
   }
 
-  function restore() {
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(doSave, 600);
+  }
+
+  async function doSave() {
+    let res;
+    try {
+      res = await STORE.save(JSON.stringify(snapshot(el.editor.innerHTML)));
+    } catch (e) {
+      res = { ok: false, error: e };
+    }
+
+    if (res.ok) {
+      saveWarned = false;
+      if (!/^Could not build/.test(el.status.textContent)) setStatus('Saved');
+      setTimeout(() => { if (el.status.textContent === 'Saved') setStatus(''); }, 1400);
+      return;
+    }
+
+    // full save refused: keep the text by dropping the pictures
+    const reduced = stripImages(el.editor.innerHTML);
+    let res2 = { ok: false };
+    if (reduced.dropped) {
+      try { res2 = await STORE.save(JSON.stringify(snapshot(reduced.html))); } catch (e) {}
+    }
+    if (res2.ok) {
+      setStatus('Document too large to save with pictures — text saved, ' +
+                reduced.dropped + ' image' + (reduced.dropped > 1 ? 's' : '') +
+                ' not kept. Export your PDF to be safe.', true);
+      return;
+    }
+    if (!saveWarned) {
+      saveWarned = true;
+      setStatus('Could not save your work — browser storage is full. ' +
+                'Export your PDF now; this document will not survive a reload.', true);
+    }
+  }
+
+  async function restore() {
     let s = null;
-    try { s = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); } catch (e) {}
-    if (!s) { el.editor.innerHTML = '<div><br></div>'; return; }
+    try { s = JSON.parse((await STORE.load()) || 'null'); } catch (e) {}
+    if (!s || typeof s !== 'object') { el.editor.innerHTML = '<div><br></div>'; return; }
     el.editor.innerHTML = s.html || '<div><br></div>';
+    if (s.headerHTML) el.pageHeader.innerHTML = s.headerHTML;
+    if (s.footerHTML) el.pageFooter.innerHTML = s.footerHTML;
     if (s.page) el.pageSize.value = s.page;
     if (s.orient) el.orientation.value = s.orient;
     el.rules.checked = !!s.rules; el.tracing.checked = !!s.tracing;
@@ -718,8 +826,6 @@
     if (s.spacing) el.spacing.value = s.spacing;
     if (s.margin) el.margin.value = s.margin;
     if (s.wsName) el.wsName.value = s.wsName;
-    if (s.headerHTML) el.pageHeader.innerHTML = s.headerHTML;
-    if (s.footerHTML) el.pageFooter.innerHTML = s.footerHTML;
     if (s.headerText) el.headerText.value = s.headerText;
     if (s.headerAlign) el.headerAlign.value = s.headerAlign;
     if (s.headerSize) el.headerSize.value = s.headerSize;
@@ -729,6 +835,9 @@
     if (s.footerSize) el.footerSize.value = s.footerSize;
     pageNumbers = !!s.pageNumbers;
     if (el.pageNumBtn) el.pageNumBtn.classList.toggle('on', pageNumbers);
+    if (el.editor.querySelector('img[data-dropped]'))
+      setStatus('Some pictures could not be saved last time and are missing.', true);
+    refresh();
   }
 
   function loadSample() {
@@ -865,7 +974,7 @@
                 ', ' + Math.round(bytes.length / 1024) + ' KB');
     } catch (e) {
       console.error(e);
-      setStatus('Could not build the PDF: ' + e.message, true);
+      setStatus('Could not build the PDF: ' + e.message, true, true);
     } finally {
       el.convert.classList.remove('busy'); el.convert.disabled = false;
     }
