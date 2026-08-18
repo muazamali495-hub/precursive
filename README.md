@@ -103,7 +103,7 @@ itself grant. If that matters for your deployment, `js/font-data.js` is the only
 place the font is bound in — swapping in a differently-licensed face is a one-file
 change, and `engine.js` parses any TrueType font.
 
-## Two pdf-lib traps worth remembering
+## Three pdf-lib traps worth remembering
 
 1. pdf-lib reads **GPOS only** for kerning. This font has none, so all 303
    `kern` pairs are applied by hand via the `TJ` operator.
