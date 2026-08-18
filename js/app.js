@@ -544,6 +544,15 @@
    */
   let activeBox = null;
 
+  function currentTextBox() {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    let n = sel.getRangeAt(0).startContainer;
+    if (n.nodeType === 3) n = n.parentNode;
+    const box = n && n.closest ? n.closest('.textbox') : null;
+    return (box && el.editor.contains(box)) ? box : null;
+  }
+
   let boxObserver = null;
   function selectTextBox(box) {
     if (activeBox && activeBox !== box) activeBox.classList.remove('active');
@@ -572,6 +581,29 @@
   }
 
   function wireTextBoxes() {
+    el.editor.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+      const box = currentTextBox();
+      if (!box) return;                       // normal text: default behaviour
+      e.preventDefault();                     // stop the box from being cloned
+      const sel = window.getSelection();
+      if (!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      range.deleteContents();                 // replace any selected text
+      const br = document.createElement('br');
+      range.insertNode(br);                   // line break, kept inside the box
+      range.setStartAfter(br); range.collapse(true);
+      // a trailing <br> needs a placeholder for the caret to show on the new line
+      if (!br.nextSibling) {
+        const zw = document.createTextNode('​');
+        br.parentNode.insertBefore(zw, br.nextSibling);
+        range.setStartAfter(zw); range.collapse(true);
+      }
+      sel.removeAllRanges(); sel.addRange(range);
+      if (activeBox === box) positionOverlay();
+      refresh(); scheduleSave();
+    });
+
     // clicking inside a box selects it; clicking anywhere else deselects
     el.editor.addEventListener('mousedown', e => {
       const box = e.target.closest && e.target.closest('.textbox');
