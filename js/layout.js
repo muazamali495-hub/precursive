@@ -1,0 +1,176 @@
+/* layout.js — styled-run layout for NTPreCursive
+ *
+ * The v1 engine laid out plain lines of one size. Rich text needs a line to
+ * mix sizes and styles, so everything here works on *runs*:
+ *
+ *   run  = { text, size, b, i, u, color }
+ *   para = { align, list, level, runs }
+ *
+ * Because the font ships a single style, bold and italic are synthesised at
+ * draw time (stroke width / sheared matrix). Metrics must account for that:
+ * synthetic bold makes glyphs fractionally wider, so measurement adds the
+ * stroke, otherwise bold text would overflow its line.
+ */
+(function (global) {
+  'use strict';
+
+  const BOLD_STROKE = 0.030;   // stroke width as a fraction of font size
+  const ITALIC_SKEW = 0.2126;  // tan(12deg)
+
+  function runWidth(font, text, style) {
+    const S = style.size / font.UPEM;
+    let w = 0, prev = -1;
+    for (const ch of text) {
+      const g = font.gid(ch.codePointAt(0));
+      if (g === undefined) continue;
+      if (prev >= 0) w += font.kern(prev, g);
+      w += font.ADV[g];
+      prev = g;
+    }
+    let out = w * S;
+    // synthetic bold strokes outward, widening the run slightly
+    if (style.b && text.length) out += style.size * BOLD_STROKE;
+    return out;
+  }
+
+  /* Split a paragraph into styled tokens (words and whitespace). */
+  function tokenize(para) {
+    const toks = [];
+    for (const run of para.runs) {
+      if (!run.text) continue;
+      for (const piece of run.text.split(/(\s+)/)) {
+        if (piece === '') continue;
+        toks.push({ text: piece, style: run, space: /^\s+$/.test(piece) });
+      }
+    }
+    return toks;
+  }
+
+  const LIST_GAP = 0.9;   // bullet gutter, in ems of the paragraph size
+
+  function bulletFor(para, index) {
+    if (para.list === 'ul') return '•';
+    if (para.list === 'ol') return index + '.';
+    return null;
+  }
+
+  /* Lay one paragraph into lines that fit colW.
+   * Returns [{ items:[{text,style,x,w}], width, ascent, descent, first }]
+   */
+  function layoutParagraph(font, para, colW, opts) {
+    const indent = (para.level || 0) * (opts.indentPt || 24);
+    const listMark = bulletFor(para, opts.listIndex || 1);
+    const markStyle = para.runs[0] || { size: opts.baseSize, b: false, i: false };
+    const markW = listMark ? runWidth(font, listMark, markStyle) + markStyle.size * LIST_GAP : 0;
+
+    const avail0 = colW - indent - markW;      // first line (after bullet)
+    const availN = colW - indent - markW;      // continuation lines align under text
+
+    const toks = tokenize(para);
+    const lines = [];
+    let cur = [], curW = 0, first = true;
+
+    const flush = () => {
+      // drop trailing whitespace tokens
+      while (cur.length && cur[cur.length - 1].space) { curW -= cur[cur.length - 1].w; cur.pop(); }
+      lines.push({ items: cur, width: curW, first });
+      cur = []; curW = 0; first = false;
+    };
+
+    for (let t = 0; t < toks.length; t++) {
+      const tok = toks[t];
+      let w = runWidth(font, tok.text, tok.style);
+      const avail = first ? avail0 : availN;
+
+      // a single word longer than the column must be split by character
+      if (!tok.space && w > avail && !cur.length) {
+        let rest = tok.text;
+        while (runWidth(font, rest, tok.style) > avail && rest.length > 1) {
+          let cut = 1;
+          while (cut < rest.length &&
+                 runWidth(font, rest.slice(0, cut + 1), tok.style) <= avail) cut++;
+          const piece = rest.slice(0, cut);
+          cur.push({ text: piece, style: tok.style, w: runWidth(font, piece, tok.style) });
+          curW = runWidth(font, piece, tok.style);
+          flush();
+          rest = rest.slice(cut);
+        }
+        if (rest) { w = runWidth(font, rest, tok.style); cur.push({ text: rest, style: tok.style, w }); curW += w; }
+        continue;
+      }
+
+      if (curW + w > avail && cur.length && !tok.space) { flush(); }
+      if (tok.space && !cur.length) continue;      // no leading spaces on a line
+      cur.push({ text: tok.text, style: tok.style, w });
+      curW += w;
+    }
+    if (cur.length || !lines.length) flush();
+
+    // vertical metrics per line, from the largest style present
+    const asc = font.ASC / font.UPEM, desc = font.DESC / font.UPEM, gap = font.GAP / font.UPEM;
+    for (const ln of lines) {
+      let maxSize = opts.baseSize;
+      for (const it of ln.items) maxSize = Math.max(maxSize, it.style.size);
+      ln.ascent = asc * maxSize;
+      ln.descent = -desc * maxSize;
+      ln.height = (asc - desc + gap) * maxSize * (opts.lineSpacing || 1);
+      ln.indent = indent;
+      ln.markW = markW;
+    }
+    if (lines.length) { lines[0].listMark = listMark; lines[0].markStyle = markStyle; }
+    return lines;
+  }
+
+  /* Assign x positions honouring alignment. Justify stretches inter-word gaps. */
+  function positionLine(line, colW, align, isLastOfPara) {
+    const startBase = line.indent + line.markW;
+    const free = (colW - startBase) - line.width;
+    let x = startBase, extra = 0;
+
+    if (align === 'center') x = startBase + free / 2;
+    else if (align === 'right') x = startBase + free;
+    else if (align === 'justify' && !isLastOfPara) {
+      const gaps = line.items.filter(i => /^\s+$/.test(i.text)).length;
+      if (gaps > 0 && free > 0) extra = free / gaps;
+    }
+    for (const it of line.items) {
+      it.x = x;
+      x += it.w + (extra && /^\s+$/.test(it.text) ? extra : 0);
+      if (extra && /^\s+$/.test(it.text)) it.w += extra;
+    }
+    return line;
+  }
+
+  /* Flow a whole document into pages.
+   * doc = [para]; returns [{ lines:[{...,y}] }]
+   */
+  function flow(font, doc, opts) {
+    const colW = opts.pageW - opts.marginL - opts.marginR;
+    const usableH = opts.pageH - opts.marginTop - opts.marginBottom;
+    const pages = [];
+    let page = [], y = 0, olCount = 0;
+
+    for (const para of doc) {
+      if (para.list === 'ol') olCount++; else olCount = 0;
+      const lines = layoutParagraph(font, para, colW, {
+        baseSize: opts.baseSize, lineSpacing: opts.lineSpacing,
+        indentPt: opts.indentPt, listIndex: olCount
+      });
+      lines.forEach((ln, idx) => {
+        positionLine(ln, colW, para.align || 'left', idx === lines.length - 1);
+        if (y + ln.height > usableH && page.length) { pages.push(page); page = []; y = 0; }
+        ln.y = y + ln.ascent;
+        y += ln.height;
+        page.push(ln);
+      });
+      y += (opts.paraSpacing || 0);
+    }
+    if (page.length || !pages.length) pages.push(page);
+    return pages;
+  }
+
+  global.NTLayout = {
+    runWidth, layoutParagraph, positionLine, flow,
+    BOLD_STROKE, ITALIC_SKEW
+  };
+})(window);

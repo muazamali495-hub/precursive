@@ -3,9 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pre-Cursive — turn your text into handwriting</title>
-<meta name="description" content="Paste any text and download it as a PDF set in the NTPreCursive handwriting font. Runs entirely in your browser — your text is never uploaded.">
-<meta name="theme-color" content="#3b7ea1">
+<title>Pre-Cursive Editor — write and print handwriting worksheets</title>
+<meta name="description" content="A word processor for the NTPreCursive handwriting font. Format text, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
+<meta name="theme-color" content="#2f6f92">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
 <link rel="stylesheet" href="css/style.css">
 </head>
@@ -15,81 +15,151 @@
   <div class="wrap topbar">
     <div class="brand">
       <span class="mark" aria-hidden="true">✍</span>
-      <span>
-        <strong>Pre-Cursive</strong>
-        <small>text → handwriting PDF</small>
-      </span>
+      <span><strong>Pre-Cursive Editor</strong><small>write, format, print handwriting</small></span>
     </div>
     <button id="themeBtn" class="ghost" type="button" aria-label="Toggle dark mode">◐</button>
   </div>
 </header>
 
-<main class="wrap grid">
+<main class="wrap app">
 
-  <!-- ---------- input ---------- -->
-  <section class="card pane">
-    <div class="pane-head">
-      <h2>Your text</h2>
-      <div class="pane-actions">
-        <button id="sample" class="ghost sm" type="button">Sample</button>
-        <button id="clear"  class="ghost sm" type="button">Clear</button>
-      </div>
+  <!-- ---------- toolbar ---------- -->
+  <div class="toolbar card" role="toolbar" aria-label="Formatting">
+    <div class="tgroup">
+      <button class="tb" data-cmd="undo" title="Undo (Ctrl+Z)" type="button">↶</button>
+      <button class="tb" data-cmd="redo" title="Redo (Ctrl+Y)" type="button">↷</button>
     </div>
-
-    <textarea id="input" spellcheck="false"
-      placeholder="Type or paste your text here…"></textarea>
-
-    <div id="notice" class="notice" hidden>
-      <div class="notice-head">
-        <span class="dot"></span>
-        <span id="noticeText"></span>
-      </div>
-      <div id="noticeDetails" class="chips"></div>
+    <span class="tsep"></span>
+    <div class="tgroup">
+      <button class="tb b"   data-cmd="bold"      title="Bold (Ctrl+B)" type="button">B</button>
+      <button class="tb i"   data-cmd="italic"    title="Italic (Ctrl+I)" type="button">I</button>
+      <button class="tb u"   data-cmd="underline" title="Underline (Ctrl+U)" type="button">U</button>
     </div>
+    <span class="tsep"></span>
+    <div class="tgroup">
+      <select id="sizeSel" class="tsel" title="Text size" aria-label="Text size">
+        <option value="" selected>Size</option>
+        <option value="14">14</option><option value="18">18</option>
+        <option value="24">24</option><option value="30">30</option>
+        <option value="40">40</option><option value="56">56</option>
+      </select>
+      <button id="colorBtn" class="tb swatch" title="Text colour" type="button">A</button>
+      <input id="colorInput" type="color" value="#1b2129" hidden>
+    </div>
+    <span class="tsep"></span>
+    <div class="tgroup">
+      <button class="tb" data-cmd="justifyLeft"   title="Align left" type="button">◧</button>
+      <button class="tb" data-cmd="justifyCenter" title="Centre" type="button">◫</button>
+      <button class="tb" data-cmd="justifyRight"  title="Align right" type="button">◨</button>
+      <button class="tb" data-cmd="justifyFull"   title="Justify" type="button">▤</button>
+    </div>
+    <span class="tsep"></span>
+    <div class="tgroup">
+      <button class="tb" data-cmd="insertUnorderedList" title="Bullet list" type="button">•—</button>
+      <button class="tb" data-cmd="insertOrderedList"   title="Numbered list" type="button">1—</button>
+      <button class="tb" data-cmd="outdent" title="Decrease indent" type="button">⇤</button>
+      <button class="tb" data-cmd="indent"  title="Increase indent" type="button">⇥</button>
+    </div>
+    <span class="tsep"></span>
+    <div class="tgroup">
+      <button class="tb" data-cmd="removeFormat" title="Clear formatting" type="button">⌫a</button>
+    </div>
+    <span class="tspacer"></span>
+    <div class="tgroup">
+      <button id="sample" class="ghost sm" type="button">Sample</button>
+      <button id="clear"  class="ghost sm" type="button">Clear</button>
+    </div>
+  </div>
 
-    <div class="controls">
+  <div class="grid">
+
+    <!-- ---------- editor ---------- -->
+    <section class="card pane">
+      <div class="pane-head">
+        <h2>Document</h2>
+        <span id="stats" class="stats">0 words</span>
+      </div>
+      <div id="editor" class="editor" contenteditable="true" spellcheck="true"
+           aria-label="Document text"><div><br></div></div>
+
+      <div id="notice" class="notice" hidden>
+        <div class="notice-head"><span class="dot"></span><span id="noticeText"></span></div>
+        <div id="noticeDetails" class="chips"></div>
+      </div>
+
+      <button id="convert" class="primary" type="button">
+        <span class="label">Convert to NT Pre-Cursive PDF</span>
+        <span class="spin" aria-hidden="true"></span>
+      </button>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <!-- ---------- page setup ---------- -->
+    <aside class="card pane">
+      <div class="pane-head"><h2>Page &amp; teaching options</h2></div>
+
+      <div class="opt-grid">
+        <label class="ctl">
+          <span>Paper</span>
+          <select id="pageSize">
+            <option value="a4" selected>A4</option>
+            <option value="letter">Letter</option>
+          </select>
+        </label>
+        <label class="ctl">
+          <span>Orientation</span>
+          <select id="orientation">
+            <option value="portrait" selected>Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </label>
+      </div>
+
       <label class="ctl">
-        <span>Size <b id="sizeVal">18pt</b></span>
-        <input id="size" type="range" min="10" max="40" step="1" value="18">
+        <span>Line spacing <b id="spacingVal">1.0×</b></span>
+        <input id="spacing" type="range" min="1" max="3" step="0.1" value="1">
       </label>
 
-      <label class="ctl narrow">
-        <span>Page</span>
-        <select id="pageSize">
-          <option value="a4" selected>A4</option>
-          <option value="letter">Letter</option>
-        </select>
+      <label class="ctl">
+        <span>Margins <b id="marginVal">20mm</b></span>
+        <input id="margin" type="range" min="28" max="113" step="1" value="56">
       </label>
 
-      <label class="ctl check">
-        <input id="rules" type="checkbox">
-        <span>Guide lines</span>
-      </label>
-    </div>
+      <div class="teach">
+        <p class="teach-title">Teaching aids</p>
 
-    <button id="convert" class="primary" type="button">
-      <span class="label">Convert to NT Pre-Cursive</span>
-      <span class="spin" aria-hidden="true"></span>
-    </button>
+        <label class="ctl check">
+          <input id="rules" type="checkbox">
+          <span><b>Guide lines</b><small>Ascender, x-height, baseline and descender rules under every line</small></span>
+        </label>
 
-    <p id="status" class="status" role="status" aria-live="polite"></p>
-  </section>
+        <label class="ctl check">
+          <input id="tracing" type="checkbox">
+          <span><b>Tracing outline</b><small>Hollow letters for pupils to trace over — Word cannot do this</small></span>
+        </label>
 
-  <!-- ---------- preview ---------- -->
-  <section class="card pane">
-    <div class="pane-head">
-      <h2>Preview</h2>
-      <span id="stats" class="stats">A4 · ready</span>
-    </div>
-    <div id="preview" class="preview">
-      <div id="sheet" class="sheet"><span class="placeholder">Your handwriting will appear here…</span></div>
-    </div>
-  </section>
+        <label class="ctl check">
+          <input id="worksheet" type="checkbox">
+          <span><b>Worksheet header</b><small>Name and date rules across the top of each page</small></span>
+        </label>
 
+        <div id="wsFields" hidden>
+          <label class="ctl">
+            <span>Worksheet title</span>
+            <input id="wsName" type="text" placeholder="e.g. Week 3 — letter families" class="tinput">
+          </label>
+        </div>
+      </div>
+
+      <p class="hint">Everything is saved in your browser automatically, and your
+      text never leaves this device.</p>
+    </aside>
+
+  </div>
 </main>
 
 <footer class="wrap foot">
-  <p>Everything runs in your browser — your text is never uploaded or stored.</p>
+  <p>Runs entirely in your browser — nothing is uploaded.</p>
   <p class="fine">Pre-Cursive typeface © 2003 Thomas Nelson &amp; Sons Ltd. · <span id="year"></span></p>
 </footer>
 
@@ -97,21 +167,22 @@
 <script src="vendor/fontkit.umd.min.js"></script>
 <script src="js/font-data.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/layout.js"></script>
+<script src="js/editor.js"></script>
 <script src="js/app.js"></script>
 <script>
-  // theme toggle (remembers choice)
-  (function () {
-    const b = document.getElementById('themeBtn');
-    const saved = localStorage.getItem('pc-theme');
-    if (saved) document.documentElement.dataset.theme = saved;
-    b.addEventListener('click', function () {
-      const cur = document.documentElement.dataset.theme
-        || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      const next = cur === 'dark' ? 'light' : 'dark';
-      document.documentElement.dataset.theme = next;
-      localStorage.setItem('pc-theme', next);
-    });
-  })();
+(function () {
+  const b = document.getElementById('themeBtn');
+  const saved = localStorage.getItem('pc-theme');
+  if (saved) document.documentElement.dataset.theme = saved;
+  b.addEventListener('click', function () {
+    const cur = document.documentElement.dataset.theme
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('pc-theme', next);
+  });
+})();
 </script>
 </body>
 </html>

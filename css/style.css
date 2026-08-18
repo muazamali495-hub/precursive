@@ -232,3 +232,93 @@ button { font: inherit; cursor: pointer; }
   textarea { min-height: 200px; }
   .sheet { padding: 24px 20px; }
 }
+
+/* ================= v2: editor, toolbar, options ================= */
+
+.app { display: flex; flex-direction: column; gap: 16px; padding-block: 20px; flex: 1; }
+
+/* ---------- toolbar ---------- */
+.toolbar {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 10px; position: sticky; top: 8px; z-index: 20;
+}
+.tgroup { display: flex; gap: 3px; }
+.tsep { width: 1px; height: 22px; background: var(--line); margin-inline: 4px; }
+.tspacer { flex: 1; }
+.tb {
+  min-width: 34px; height: 34px; padding: 0 8px;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--ink-soft);
+  font-size: 14px; line-height: 1; display: grid; place-items: center;
+  transition: background .13s ease, color .13s ease, border-color .13s ease;
+}
+.tb:hover { background: var(--bg); color: var(--ink); border-color: var(--line); }
+.tb.on { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
+.tb.b { font-weight: 800; }
+.tb.i { font-style: italic; font-family: Georgia, serif; }
+.tb.u { text-decoration: underline; }
+.tb.swatch { position: relative; font-weight: 700; }
+.tb.swatch::after {
+  content: ''; position: absolute; left: 6px; right: 6px; bottom: 4px; height: 3px;
+  border-radius: 2px; background: var(--swatch, #1b2129);
+}
+.tsel {
+  height: 34px; padding: 0 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface);
+  color: var(--ink); font: inherit; font-size: 13px;
+}
+
+/* ---------- layout ---------- */
+.grid { align-items: start; }
+@media (min-width: 901px) { .grid { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); } }
+
+/* ---------- editor surface ---------- */
+.editor {
+  min-height: 460px; max-height: 62vh; overflow: auto;
+  padding: 30px 32px;
+  border: 1px solid var(--paper-edge); border-radius: 8px;
+  background: var(--paper); color: #1b2129;
+  font-family: 'NTPreCursive', Georgia, serif;
+  font-size: 18px; line-height: calc(1.158 * var(--ls, 1));
+  outline: none;
+}
+.editor:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.editor ul, .editor ol { padding-left: 1.4em; margin: 0; }
+.editor li { margin: 0; }
+.editor h1 { font-size: 1.9em; margin: .3em 0; }
+.editor h2 { font-size: 1.5em; margin: .3em 0; }
+.editor div { min-height: 1em; }
+/* tracing preview: hollow letters, matching the PDF output */
+.editor.tracing {
+  color: transparent;
+  -webkit-text-stroke: 0.6px #1b2129;
+  text-stroke: 0.6px #1b2129;
+}
+
+/* ---------- options panel ---------- */
+.opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.teach {
+  border: 1px solid var(--line); border-radius: 11px;
+  padding: 12px 13px; background: var(--bg);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.teach-title {
+  margin: 0; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 600;
+}
+.ctl.check { align-items: flex-start; gap: 10px; }
+.ctl.check input { margin-top: 3px; flex: none; }
+.ctl.check span { display: flex; flex-direction: column; gap: 1px; }
+.ctl.check b { font-size: 13.5px; color: var(--ink); font-weight: 600; }
+.ctl.check small { font-size: 12px; color: var(--ink-faint); line-height: 1.45; }
+.tinput {
+  padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 13px; width: 100%;
+}
+.hint { margin: 0; font-size: 12px; color: var(--ink-faint); line-height: 1.5; }
+
+@media (max-width: 560px) {
+  .editor { padding: 20px 18px; min-height: 340px; }
+  .toolbar { position: static; }
+  .opt-grid { grid-template-columns: 1fr; }
+}
