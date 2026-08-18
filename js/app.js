@@ -273,10 +273,17 @@
     menu.style.visibility = 'hidden';
     const b = btn.getBoundingClientRect();
     const m = menu.getBoundingClientRect();
+    // innerWidth/innerHeight can be 0 in a hidden or not-yet-composited view;
+    // fall back so the clamp never decides the whole window is off screen.
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1024;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 768;
     let left = b.left;
     let top = b.bottom + 3;
-    if (left + m.width > innerWidth - 8) left = Math.max(8, innerWidth - m.width - 8);
-    if (top + m.height > innerHeight - 8) top = Math.max(8, b.top - m.height - 3);
+    if (left + m.width > vw - 8) left = Math.max(8, vw - m.width - 8);
+    // only flip above the button when there is genuinely more room up there
+    if (top + m.height > vh - 8 && b.top - m.height - 3 >= 8) top = b.top - m.height - 3;
+    if (top + m.height > vh - 8) top = Math.max(8, vh - m.height - 8);
+    if (top < 8) top = 8;
     menu.style.left = Math.round(left) + 'px';
     menu.style.top = Math.round(top) + 'px';
     menu.style.visibility = '';
