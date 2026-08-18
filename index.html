@@ -7,8 +7,8 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=5">
-<link rel="stylesheet" href="css/ribbon.css?v=5">
+<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/ribbon.css?v=6">
 </head>
 <body>
 
@@ -176,7 +176,42 @@
       <div class="rb-body">
         <div class="rb-col">
           <button class="rb-small" id="headerBtn" type="button"><span class="ic">▔</span>Header</button>
+          <div id="headerMenu" class="popmenu" hidden>
+            <p class="popttl">Header — repeats on every page</p>
+            <input id="headerText" class="tinput" type="text" placeholder="Header text">
+            <div class="poprow">
+              <label>Align
+                <select id="headerAlign">
+                  <option value="left">Left</option>
+                  <option value="center" selected>Centre</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+              <label>Size
+                <input id="headerSize" type="number" min="6" max="36" value="11">
+              </label>
+            </div>
+            <label class="popchk"><input id="headerRule" type="checkbox" checked> Line under header</label>
+          </div>
+
           <button class="rb-small" id="footerBtn" type="button"><span class="ic">▁</span>Footer</button>
+          <div id="footerMenu" class="popmenu" hidden>
+            <p class="popttl">Footer — repeats on every page</p>
+            <input id="footerText" class="tinput" type="text" placeholder="Footer text">
+            <div class="poprow">
+              <label>Align
+                <select id="footerAlign">
+                  <option value="left">Left</option>
+                  <option value="center" selected>Centre</option>
+                  <option value="right">Right</option>
+                </select>
+              </label>
+              <label>Size
+                <input id="footerSize" type="number" min="6" max="36" value="10">
+              </label>
+            </div>
+          </div>
+
           <button class="rb-small" id="pageNumBtn" type="button"><span class="ic">#</span>Page Number</button>
         </div>
       </div>
@@ -284,11 +319,11 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=5"></script>
-<script src="js/engine.js?v=5"></script>
-<script src="js/layout.js?v=5"></script>
-<script src="js/editor.js?v=5"></script>
-<script src="js/app.js?v=5"></script>
+<script src="js/font-data.js?v=6"></script>
+<script src="js/engine.js?v=6"></script>
+<script src="js/layout.js?v=6"></script>
+<script src="js/editor.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
 <script>
 (function () {
   // ribbon tab switching

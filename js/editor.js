@@ -69,7 +69,7 @@
       const runs = [];
       const walk = (node, inherited) => {
         if (node.nodeType === 3) {
-          const t = node.nodeValue.replace(/ /g, ' ');
+          const t = node.nodeValue.replace(/​/g, '').replace(/ /g, ' ');
           if (t) runs.push({
             text: t,
             size: inherited.size || baseSize,

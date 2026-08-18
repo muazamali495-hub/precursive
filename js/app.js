@@ -19,7 +19,9 @@
    'caseBtn','caseMenu','spacingBtn','spacingMenu','marksBtn','fmtPainter',
    'blankPageBtn','coverBtn','pictureBtn','pictureInput','shapeBtn','shapeMenu',
    'linkBtn','unlinkBtn','headerBtn','footerBtn','pageNumBtn','textBoxBtn',
-   'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid']
+   'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid',
+   'headerMenu','headerText','headerAlign','headerSize','headerRule',
+   'footerMenu','footerText','footerAlign','footerSize']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -87,36 +89,6 @@
     /* Size: any value from 1 to 300. execCommand's fontSize only accepts the
        legacy 1-7 scale, so tag the selection with size 7 and immediately
        rewrite those <font> tags to a real pixel size. */
-    /* With styleWithCSS ON, execCommand('fontSize') emits
-     *   <span style="font-size: xxx-large">
-     * rather than <font size="7">, so any rewrite that looks for font tags
-     * silently finds nothing and the size never reaches the PDF. Turn
-     * styleWithCSS OFF for the duration of the call so we reliably get
-     * <font size="7">, swap those for a real pixel size, then restore it.
-     */
-    const applySize = px => {
-      px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
-      el.sizeInput.value = px;
-      el.editor.focus();
-
-      let prev = true;
-      try { prev = document.queryCommandState('styleWithCSS'); } catch (e) {}
-      try { document.execCommand('styleWithCSS', false, false); } catch (e) {}
-      document.execCommand('fontSize', false, '7');
-      try { document.execCommand('styleWithCSS', false, prev); } catch (e) {}
-
-      const tagged = el.editor.querySelectorAll('font[size="7"], span[style*="xxx-large"]');
-      tagged.forEach(f => {
-        const s = document.createElement('span');
-        s.style.fontSize = px + 'px';
-        while (f.firstChild) s.appendChild(f.firstChild);
-        // a nested size would win over the one we just set
-        s.querySelectorAll('[style*="font-size"]').forEach(n => n.style.fontSize = '');
-        s.querySelectorAll('font[size]').forEach(n => n.removeAttribute('size'));
-        f.replaceWith(s);
-      });
-      refresh(); scheduleSave();
-    };
     el.sizeInput.addEventListener('change', () => applySize(el.sizeInput.value));
     el.sizeInput.addEventListener('keydown', e => {
       if (e.key === 'Enter') { e.preventDefault(); applySize(el.sizeInput.value); }
@@ -216,13 +188,11 @@
     el.unlinkBtn.addEventListener('click', () => exec('unlink'));
 
     /* --- Insert: header / footer / page number --- */
-    el.headerBtn.addEventListener('click', () => {
-      el.worksheet.checked = true;
-      el.worksheet.dispatchEvent(new Event('change', { bubbles: true }));
-      switchTab('view');
-      el.wsName.focus();
-    });
-    el.footerBtn.addEventListener('click', () => { pageNumbers = true; setStatus('Footer page numbers on'); refresh(); });
+    popToggle(el.headerBtn, el.headerMenu, () => setTimeout(() => el.headerText.focus(), 0));
+    popToggle(el.footerBtn, el.footerMenu, () => setTimeout(() => el.footerText.focus(), 0));
+    [el.headerText, el.headerAlign, el.headerSize, el.headerRule,
+     el.footerText, el.footerAlign, el.footerSize].forEach(c =>
+      c.addEventListener('input', () => { refresh(); scheduleSave(); }));
     el.pageNumBtn.addEventListener('click', () => {
       pageNumbers = !pageNumbers;
       el.pageNumBtn.classList.toggle('on', pageNumbers);
@@ -392,6 +362,88 @@
       }));
   }
 
+  /* ---------- font size ----------
+   * execCommand('fontSize') is unusable here. It only understands the legacy
+   * 1-7 scale, what it emits depends on styleWithCSS, and with a collapsed
+   * caret it reaches for the nearest inline ancestor — which is how changing
+   * the size for a new paragraph could silently restyle the previous one.
+   *
+   * Instead we work on the Range directly: split the boundary text nodes so
+   * only the selected characters are affected, wrap each selected text node in
+   * its own span, and clear any font-size inside that span so the new value
+   * wins. With a collapsed caret we insert an empty styled span and park the
+   * caret in it, so the size applies to what is typed next and to nothing else.
+   */
+  const ZWSP = '​';
+
+  function applySize(px) {
+    px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
+    el.sizeInput.value = px;
+    el.editor.focus();
+
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    let range = sel.getRangeAt(0);
+    if (!el.editor.contains(range.commonAncestorContainer)) return;
+
+    if (range.collapsed) {
+      const span = document.createElement('span');
+      span.style.fontSize = px + 'px';
+      span.appendChild(document.createTextNode(ZWSP));
+      range.insertNode(span);
+      const r = document.createRange();
+      r.setStart(span.firstChild, 1);
+      r.collapse(true);
+      sel.removeAllRanges(); sel.addRange(r);
+      refresh(); scheduleSave();
+      return;
+    }
+
+    // split the partially-selected boundary nodes so we never touch
+    // characters outside the selection
+    let { startContainer: sc, startOffset: so, endContainer: ec, endOffset: eo } = range;
+    if (ec.nodeType === 3 && eo > 0 && eo < ec.nodeValue.length) {
+      ec.splitText(eo);
+      if (sc === ec && so > eo) { sc = ec; }
+    }
+    if (sc.nodeType === 3 && so > 0 && so < sc.nodeValue.length) {
+      const after = sc.splitText(so);
+      if (ec === sc) ec = after;
+      sc = after; so = 0;
+    }
+    range = document.createRange();
+    range.setStart(sc, sc.nodeType === 3 ? 0 : so);
+    range.setEnd(ec, ec.nodeType === 3 ? ec.nodeValue.length : eo);
+
+    const targets = [];
+    const walker = document.createTreeWalker(el.editor, NodeFilter.SHOW_TEXT, null);
+    let n;
+    while ((n = walker.nextNode())) {
+      if (!n.nodeValue.length) continue;
+      if (range.intersectsNode(n)) targets.push(n);
+    }
+    if (!targets.length) return;
+
+    let first = null, last = null;
+    for (const t of targets) {
+      if (!t.parentNode) continue;
+      const span = document.createElement('span');
+      span.style.fontSize = px + 'px';
+      t.parentNode.insertBefore(span, t);
+      span.appendChild(t);
+      // an ancestor size is overridden by this span; a *descendant* size would
+      // beat it, but a text node has none, so nothing further is needed here
+      first = first || span; last = span;
+    }
+    // strip now-redundant sizes on ancestors that only wrapped this run
+    const r2 = document.createRange();
+    if (first && last) {
+      r2.setStartBefore(first); r2.setEndAfter(last);
+      sel.removeAllRanges(); sel.addRange(r2);
+    }
+    refresh(); scheduleSave();
+  }
+
   const MIN_SIZE = 1, MAX_SIZE = 300;
   const SIZE_STEPS = [8,9,10,11,12,14,16,18,20,24,28,32,40,48,56,72,96,120,150,200,250,300];
   function stepSize(dir) {
@@ -501,7 +553,11 @@
           page: el.pageSize.value, orient: el.orientation.value,
           rules: el.rules.checked, tracing: el.tracing.checked,
           worksheet: el.worksheet.checked, spacing: el.spacing.value,
-          margin: el.margin.value, wsName: el.wsName.value, at: Date.now()
+          margin: el.margin.value, wsName: el.wsName.value,
+          headerText: el.headerText.value, headerAlign: el.headerAlign.value,
+          headerSize: el.headerSize.value, headerRule: el.headerRule.checked,
+          footerText: el.footerText.value, footerAlign: el.footerAlign.value,
+          footerSize: el.footerSize.value, pageNumbers: pageNumbers, at: Date.now()
         }));
         if (!/^Done/.test(el.status.textContent)) {
           setStatus('Saved');
@@ -523,6 +579,15 @@
     if (s.spacing) el.spacing.value = s.spacing;
     if (s.margin) el.margin.value = s.margin;
     if (s.wsName) el.wsName.value = s.wsName;
+    if (s.headerText) el.headerText.value = s.headerText;
+    if (s.headerAlign) el.headerAlign.value = s.headerAlign;
+    if (s.headerSize) el.headerSize.value = s.headerSize;
+    if (s.headerRule !== undefined) el.headerRule.checked = !!s.headerRule;
+    if (s.footerText) el.footerText.value = s.footerText;
+    if (s.footerAlign) el.footerAlign.value = s.footerAlign;
+    if (s.footerSize) el.footerSize.value = s.footerSize;
+    pageNumbers = !!s.pageNumbers;
+    if (el.pageNumBtn) el.pageNumBtn.classList.toggle('on', pageNumbers);
   }
 
   function loadSample() {
@@ -584,6 +649,8 @@
         const top = o.pageH - flowOpts.marginTop;
 
         if (worksheet) drawWorksheetHeader(P, page, font, KEY, o);
+        drawRunningHeader(P, page, font, KEY, o);
+        drawRunningFooter(P, page, font, KEY, o, pi + 1, pages.length);
 
         for (const item of lines) {
           if (item.kind === 'image') {
@@ -634,7 +701,6 @@
           }
           drawLineItems(P, page, font, KEY, ln, o.marginL, baseY, tracing);
         }
-        if (pageNumbers || pages.length > 1) drawPageNumber(P, page, font, KEY, o, pi + 1, pages.length);
       });
 
       const bytes = await pdf.save();
@@ -803,6 +869,44 @@
       P.setLineWidth(0.8), P.setStrokingRgbColor(0.62, 0.68, 0.74),
       P.moveTo(x1, y - 12), P.lineTo(x2, y - 12), P.stroke(),
       P.popGraphicsState());
+  }
+
+  /* Header and footer sit inside the page margins and repeat on every page,
+     the same way Word does it, so the body text never has to make room. */
+  function alignedX(text, size, align, o) {
+    const w = NTLayout.runWidth(FONT, text, { size: size });
+    if (align === 'center') return (o.pageW - w) / 2;
+    if (align === 'right') return o.pageW - o.marginR - w;
+    return o.marginL;
+  }
+
+  function drawRunningHeader(P, page, font, KEY, o) {
+    const text = (el.headerText.value || '').trim();
+    if (!text) return;
+    const size = Math.max(6, Math.min(36, +el.headerSize.value || 11));
+    const baseY = o.pageH - Math.max(14, o.marginTop * 0.5);
+    const folded = NTEngine.fold(FONT, text).text;
+    drawRun(P, page, font, KEY, folded,
+            { size: size, color: 'rgb(90,100,112)' },
+            alignedX(folded, size, el.headerAlign.value, o), baseY, false);
+    if (el.headerRule.checked) {
+      const y = baseY - size * 0.42;
+      page.pushOperators(
+        P.pushGraphicsState(), P.setLineWidth(0.6), P.setStrokingRgbColor(0.72, 0.77, 0.82),
+        P.moveTo(o.marginL, y), P.lineTo(o.pageW - o.marginR, y), P.stroke(), P.popGraphicsState());
+    }
+  }
+
+  function drawRunningFooter(P, page, font, KEY, o, n, total) {
+    let text = (el.footerText.value || '').trim();
+    if (pageNumbers) text = text ? text + '   ' + n + ' / ' + total : n + ' / ' + total;
+    if (!text) return;
+    const size = Math.max(6, Math.min(36, +el.footerSize.value || 10));
+    const baseY = Math.max(12, o.marginBottom * 0.45);
+    const folded = NTEngine.fold(FONT, text).text;
+    drawRun(P, page, font, KEY, folded,
+            { size: size, color: 'rgb(110,120,132)' },
+            alignedX(folded, size, el.footerAlign.value, o), baseY, false);
   }
 
   function drawPageNumber(P, page, font, KEY, o, n, total) {
