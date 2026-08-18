@@ -7,8 +7,8 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=9">
-<link rel="stylesheet" href="css/ribbon.css?v=9">
+<link rel="stylesheet" href="css/style.css?v=10">
+<link rel="stylesheet" href="css/ribbon.css?v=10">
 </head>
 <body>
 
@@ -178,6 +178,7 @@
           <button class="rb-small" id="headerBtn" type="button"><span class="ic">▔</span>Header</button>
           <div id="headerMenu" class="popmenu" hidden>
             <p class="popttl">Header — repeats on every page</p>
+            <p class="pophint">Type directly in the header area at the top of the page.</p>
             <input id="headerText" class="tinput" type="text" placeholder="Header text">
             <div class="poprow">
               <label>Align
@@ -197,6 +198,7 @@
           <button class="rb-small" id="footerBtn" type="button"><span class="ic">▁</span>Footer</button>
           <div id="footerMenu" class="popmenu" hidden>
             <p class="popttl">Footer — repeats on every page</p>
+            <p class="pophint">Type directly in the footer area at the bottom of the page.</p>
             <input id="footerText" class="tinput" type="text" placeholder="Footer text">
             <div class="poprow">
               <label>Align
@@ -297,10 +299,16 @@
 <!-- ===================== document ===================== -->
 <main class="stage">
   <div class="sheet">
-    <div id="pageHeader" class="pagehf top" hidden><span></span></div>
+    <div class="hfzone top" data-tab="Header">
+      <div id="pageHeader" class="pagehf top" contenteditable="true"
+           data-label="Header" aria-label="Page header"><div><br></div></div>
+    </div>
     <div id="editor" class="editor page" contenteditable="true" spellcheck="true"
          aria-label="Document text"><div><br></div></div>
-    <div id="pageFooter" class="pagehf bottom" hidden><span></span></div>
+    <div class="hfzone bottom" data-tab="Footer">
+      <div id="pageFooter" class="pagehf bottom" contenteditable="true"
+           data-label="Footer" aria-label="Page footer"><div><br></div></div>
+    </div>
   </div>
   <!-- resize handles for the selected text box; lives outside the editable
        area so it can never be typed into or deleted by the user -->
@@ -330,11 +338,11 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=9"></script>
-<script src="js/engine.js?v=9"></script>
-<script src="js/layout.js?v=9"></script>
-<script src="js/editor.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/font-data.js?v=10"></script>
+<script src="js/engine.js?v=10"></script>
+<script src="js/layout.js?v=10"></script>
+<script src="js/editor.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
 <script>
 (function () {
   // ribbon tab switching

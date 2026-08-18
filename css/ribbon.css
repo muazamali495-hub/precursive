@@ -164,22 +164,6 @@ button { font:inherit; cursor:pointer; }
   .primary { width:100%; }
 }
 
-/* header / footer bands shown on the on-screen page (Word print-layout look) */
-.sheet { width:100%; max-width:794px; margin:0 auto; }
-.sheet .editor.page { margin:0; }
-.pagehf {
-  background:var(--paper); border:1px solid var(--paper-edge);
-  color:#5a6470; font-family:"NTPreCursive", Georgia, serif;
-  padding:14px 72px 6px; line-height:1.3;
-  box-shadow:0 2px 14px rgba(0,0,0,.36);
-}
-.pagehf.top { border-bottom:0; padding:26px 72px 6px; }
-.pagehf.bottom { border-top:0; padding:6px 72px 24px; }
-.pagehf.top.ruled span { display:block; border-bottom:1px solid #b7c0c9; padding-bottom:5px; }
-.sheet .pagehf.top:not([hidden]) + .editor.page { border-top:0; padding-top:20px; }
-.sheet .editor.page:has(+ .pagehf.bottom:not([hidden])) { border-bottom:0; padding-bottom:20px; }
-@media (max-width:760px) { .pagehf { padding-inline:26px; } }
-
 /* ---------- resizable text box (Word-style) ---------- */
 .stage { position:relative; }
 .editor .textbox {
@@ -206,3 +190,34 @@ button { font:inherit; cursor:pointer; }
 .tb-h[data-dir="sw"] { left:0;    top:100%; cursor:nesw-resize; }
 .tb-h[data-dir="s"]  { left:50%;  top:100%; cursor:ns-resize; }
 .tb-h[data-dir="se"] { left:100%; top:100%; cursor:nwse-resize; }
+
+/* ---------- Word-style header / footer areas on the page ---------- */
+.sheet { width:100%; max-width:794px; margin:0 auto; background:var(--paper);
+  border:1px solid var(--paper-edge); box-shadow:0 2px 14px rgba(0,0,0,.36); }
+.sheet .editor.page { margin:0; border:0; box-shadow:none; background:transparent;
+  min-height:840px; padding:26px 72px; }
+
+.hfzone { position:relative; }
+.pagehf {
+  min-height:44px; padding:16px 72px 10px; outline:none;
+  font-family:"NTPreCursive", Georgia, serif; font-size:11pt;
+  color:#3b444e; line-height:1.35;
+}
+.pagehf.top    { border-bottom:1px dashed #9aa4ae; padding-top:24px; }
+.pagehf.bottom { border-top:1px dashed #9aa4ae; padding-bottom:24px; }
+.pagehf div { min-height:1em; }
+/* the little grey tab Word puts on the boundary */
+.hfzone::after {
+  content:attr(data-tab); position:absolute; left:14px;
+  background:#e6e6e6; border:1px solid #b9b9b9; color:#444;
+  font-family:var(--font-ui); font-size:10.5px; line-height:1;
+  padding:3px 7px; pointer-events:none; opacity:0; transition:opacity .12s;
+}
+.hfzone.top::after    { bottom:-9px; }
+.hfzone.bottom::after { top:-9px; }
+.hfzone.show-tab::after { opacity:1; }
+.pagehf:empty::before, .pagehf.blank::before {
+  content:attr(data-label); color:#a8b0b8; font-family:var(--font-ui); font-size:12px;
+}
+:root[data-theme="dark"] .pagehf { color:#3b444e; }
+@media (max-width:760px) { .pagehf { padding-inline:26px; } .sheet .editor.page { padding-inline:26px; } }

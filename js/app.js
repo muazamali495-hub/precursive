@@ -64,6 +64,21 @@
       [el.pageSize, el.orientation, el.rules, el.tracing, el.worksheet, el.spacing, el.margin]
         .forEach(c => c && c.addEventListener(ev, () => { refresh(); scheduleSave(); }));
     });
+    [el.pageHeader, el.pageFooter].forEach(rg => {
+      rg.addEventListener('input', () => { refresh(); scheduleSave(); });
+      rg.addEventListener('focus', markRegion);
+      rg.addEventListener('paste', e => {
+        e.preventDefault();
+        const t = (e.clipboardData || window.clipboardData).getData('text/plain');
+        document.execCommand('insertText', false, t);
+      });
+    });
+    el.headerText.addEventListener('input', () => {
+      el.pageHeader.textContent = el.headerText.value; refresh(); scheduleSave();
+    });
+    el.footerText.addEventListener('input', () => {
+      el.pageFooter.textContent = el.footerText.value; refresh(); scheduleSave();
+    });
     el.convert.addEventListener('click', makePDF);
     el.sample.addEventListener('click', loadSample);
     el.clear.addEventListener('click', () => {
@@ -191,8 +206,8 @@
     /* --- Insert: header / footer / page number --- */
     popToggle(el.headerBtn, el.headerMenu, () => setTimeout(() => el.headerText.focus(), 0));
     popToggle(el.footerBtn, el.footerMenu, () => setTimeout(() => el.footerText.focus(), 0));
-    [el.headerText, el.headerAlign, el.headerSize, el.headerRule,
-     el.footerText, el.footerAlign, el.footerSize].forEach(c =>
+    [el.headerAlign, el.headerSize, el.headerRule,
+     el.footerAlign, el.footerSize].forEach(c =>
       c.addEventListener('input', () => { refresh(); scheduleSave(); }));
     el.pageNumBtn.addEventListener('click', () => {
       pageNumbers = !pageNumbers;
@@ -238,24 +253,37 @@
      used to insert at the very top of the document instead of where you were
      working. So remember the last caret position inside the editor and put it
      back before acting on it. */
+  let activeRegion = null;
+  const regions = () => [el.editor, el.pageHeader, el.pageFooter].filter(Boolean);
+  const regionOf = node => regions().find(rg => rg.contains(node)) || null;
+
   document.addEventListener('selectionchange', () => {
     const s = window.getSelection();
     if (!s || !s.rangeCount) return;
     const r = s.getRangeAt(0);
-    if (el.editor.contains(r.commonAncestorContainer)) savedRange = r.cloneRange();
+    const rg = regionOf(r.commonAncestorContainer);
+    if (rg) { savedRange = r.cloneRange(); activeRegion = rg; markRegion(); }
   });
 
+  function markRegion() {
+    document.querySelectorAll('.hfzone').forEach(z =>
+      z.classList.toggle('show-tab', z.contains(activeRegion)));
+  }
+
+  /* Restore the caret into whichever region it was last in, so the ribbon
+     formats the header or footer when you are working there, not the body. */
   function focusEditor() {
+    const target = activeRegion && document.contains(activeRegion) ? activeRegion : el.editor;
     const s = window.getSelection();
-    const inside = r => r && el.editor.contains(r.commonAncestorContainer);
-    if (s && s.rangeCount && inside(s.getRangeAt(0))) { el.editor.focus(); return; }
-    el.editor.focus();
+    const inside = r => r && target.contains(r.commonAncestorContainer);
+    if (s && s.rangeCount && inside(s.getRangeAt(0))) { target.focus(); return; }
+    target.focus();
     const sel = window.getSelection();
-    if (inside(savedRange)) { sel.removeAllRanges(); sel.addRange(savedRange); return; }
-    // nothing remembered: put the caret at the end rather than the start
+    if (savedRange && target.contains(savedRange.commonAncestorContainer)) {
+      sel.removeAllRanges(); sel.addRange(savedRange); return;
+    }
     const r = document.createRange();
-    r.selectNodeContents(el.editor);
-    r.collapse(false);
+    r.selectNodeContents(target); r.collapse(false);
     sel.removeAllRanges(); sel.addRange(r);
   }
 
@@ -319,8 +347,10 @@
     if (!sel.rangeCount) return null;
     let n = sel.getRangeAt(0).startContainer;
     if (n.nodeType === 3) n = n.parentNode;
-    while (n && n !== el.editor && !/^(DIV|P|LI|H1|H2|H3|TD|TH)$/.test(n.tagName)) n = n.parentNode;
-    return n === el.editor ? null : n;
+    const rg = regionOf(n);
+    if (!rg) return null;
+    while (n && n !== rg && !/^(DIV|P|LI|H1|H2|H3|TD|TH)$/.test(n.tagName)) n = n.parentNode;
+    return n === rg ? null : n;
   }
   function applyToBlock(fn) {
     const b = currentBlock();
@@ -494,7 +524,9 @@
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
     let range = sel.getRangeAt(0);
-    if (!el.editor.contains(range.commonAncestorContainer)) return;
+    // may be the body, the header or the footer
+    const region = regionOf(range.commonAncestorContainer);
+    if (!region) return;
 
     if (range.collapsed) {
       const span = document.createElement('span');
@@ -526,7 +558,7 @@
     range.setEnd(ec, ec.nodeType === 3 ? ec.nodeValue.length : eo);
 
     const targets = [];
-    const walker = document.createTreeWalker(el.editor, NodeFilter.SHOW_TEXT, null);
+    const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT, null);
     let n;
     while ((n = walker.nextNode())) {
       if (!n.nodeValue.length) continue;
@@ -654,20 +686,19 @@
 
   /* Mirror the running header and footer onto the on-screen page so the
      teacher sees what will print, the way Word's print layout does. */
+  const regionText = rg => (rg ? rg.textContent : '').replace(/​/g, '').trim();
+
   function syncPageHF() {
-    const ht = (el.headerText.value || '').trim();
-    el.pageHeader.hidden = !ht;
-    el.pageHeader.firstElementChild.textContent = ht;
     el.pageHeader.style.textAlign = el.headerAlign.value;
     el.pageHeader.style.fontSize = (+el.headerSize.value || 11) + 'pt';
-    el.pageHeader.classList.toggle('ruled', el.headerRule.checked);
-
-    let ft = (el.footerText.value || '').trim();
-    if (pageNumbers) ft = ft ? ft + '   1 / n' : '1 / n';
-    el.pageFooter.hidden = !ft;
-    el.pageFooter.firstElementChild.textContent = ft;
+    el.pageHeader.style.borderBottomStyle = el.headerRule.checked ? 'dashed' : 'none';
     el.pageFooter.style.textAlign = el.footerAlign.value;
     el.pageFooter.style.fontSize = (+el.footerSize.value || 10) + 'pt';
+    el.pageHeader.classList.toggle('blank', !regionText(el.pageHeader));
+    el.pageFooter.classList.toggle('blank', !regionText(el.pageFooter));
+    // keep the ribbon field showing the plain text, for quick edits
+    if (document.activeElement !== el.headerText) el.headerText.value = regionText(el.pageHeader);
+    if (document.activeElement !== el.footerText) el.footerText.value = regionText(el.pageFooter);
   }
 
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -684,6 +715,7 @@
           rules: el.rules.checked, tracing: el.tracing.checked,
           worksheet: el.worksheet.checked, spacing: el.spacing.value,
           margin: el.margin.value, wsName: el.wsName.value,
+          headerHTML: el.pageHeader.innerHTML, footerHTML: el.pageFooter.innerHTML,
           headerText: el.headerText.value, headerAlign: el.headerAlign.value,
           headerSize: el.headerSize.value, headerRule: el.headerRule.checked,
           footerText: el.footerText.value, footerAlign: el.footerAlign.value,
@@ -709,6 +741,8 @@
     if (s.spacing) el.spacing.value = s.spacing;
     if (s.margin) el.margin.value = s.margin;
     if (s.wsName) el.wsName.value = s.wsName;
+    if (s.headerHTML) el.pageHeader.innerHTML = s.headerHTML;
+    if (s.footerHTML) el.pageFooter.innerHTML = s.footerHTML;
     if (s.headerText) el.headerText.value = s.headerText;
     if (s.headerAlign) el.headerAlign.value = s.headerAlign;
     if (s.headerSize) el.headerSize.value = s.headerSize;
@@ -1025,17 +1059,37 @@
     return o.marginL;
   }
 
+  /* Draw an editable region (header or footer) as real styled runs, so bold,
+     size and colour applied in that area all carry through to the PDF. */
+  function drawRegion(P, page, font, KEY, o, regionEl, align, size, baseY, tracing, extra) {
+    const raw = NTEditor.parseDocument(regionEl, size);
+    const { doc } = NTEditor.foldDocument(FONT, raw, NTEngine.fold);
+    const colW = o.pageW - o.marginL - o.marginR;
+    let y = baseY, drew = false;
+    for (const para of doc) {
+      if (para.type) continue;
+      if (extra && !drew) para.runs = para.runs.concat([{ text: extra, size: size }]);
+      const hasText = para.runs.some(r => (r.text || '').trim());
+      if (!hasText) continue;
+      const lines = NTLayout.layoutParagraph(FONT, para, colW,
+        { baseSize: size, lineSpacing: 1, indentPt: 0 });
+      lines.forEach((ln, i) => {
+        NTLayout.positionLine(ln, colW, align, i === lines.length - 1);
+        drawLineItems(P, page, font, KEY, ln, o.marginL, y, tracing);
+        y -= ln.height;
+      });
+      drew = true;
+    }
+    return { drew: drew, bottom: y };
+  }
+
   function drawRunningHeader(P, page, font, KEY, o) {
-    const text = (el.headerText.value || '').trim();
-    if (!text) return;
     const size = Math.max(6, Math.min(36, +el.headerSize.value || 11));
     const baseY = o.pageH - Math.max(14, o.marginTop * 0.5);
-    const folded = NTEngine.fold(FONT, text).text;
-    drawRun(P, page, font, KEY, folded,
-            { size: size, color: 'rgb(90,100,112)' },
-            alignedX(folded, size, el.headerAlign.value, o), baseY, false);
-    if (el.headerRule.checked) {
-      const y = baseY - size * 0.42;
+    const res = drawRegion(P, page, font, KEY, o, el.pageHeader, el.headerAlign.value,
+                           size, baseY, false, null);
+    if (res.drew && el.headerRule.checked) {
+      const y = res.bottom + size * 0.20;
       page.pushOperators(
         P.pushGraphicsState(), P.setLineWidth(0.6), P.setStrokingRgbColor(0.72, 0.77, 0.82),
         P.moveTo(o.marginL, y), P.lineTo(o.pageW - o.marginR, y), P.stroke(), P.popGraphicsState());
@@ -1043,15 +1097,11 @@
   }
 
   function drawRunningFooter(P, page, font, KEY, o, n, total) {
-    let text = (el.footerText.value || '').trim();
-    if (pageNumbers) text = text ? text + '   ' + n + ' / ' + total : n + ' / ' + total;
-    if (!text) return;
     const size = Math.max(6, Math.min(36, +el.footerSize.value || 10));
     const baseY = Math.max(12, o.marginBottom * 0.45);
-    const folded = NTEngine.fold(FONT, text).text;
-    drawRun(P, page, font, KEY, folded,
-            { size: size, color: 'rgb(110,120,132)' },
-            alignedX(folded, size, el.footerAlign.value, o), baseY, false);
+    const num = pageNumbers ? '   ' + n + ' / ' + total : null;
+    drawRegion(P, page, font, KEY, o, el.pageFooter, el.footerAlign.value,
+               size, baseY, false, num);
   }
 
   function drawPageNumber(P, page, font, KEY, o, n, total) {
