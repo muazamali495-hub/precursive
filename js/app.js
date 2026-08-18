@@ -21,7 +21,7 @@
    'linkBtn','unlinkBtn','headerBtn','footerBtn','pageNumBtn','textBoxBtn',
    'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid',
    'headerMenu','headerText','headerAlign','headerSize','headerRule',
-   'footerMenu','footerText','footerAlign','footerSize']
+   'footerMenu','footerText','footerAlign','footerSize','pageHeader','pageFooter']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -76,7 +76,7 @@
 
   /* ---------- toolbar ---------- */
   function exec(cmd, val) {
-    el.editor.focus();
+    focusEditor();
     document.execCommand(cmd, false, val === undefined ? null : val);
     refresh(); scheduleSave(); syncToolbarState();
   }
@@ -224,10 +224,37 @@
   }
 
   /* ---------- ribbon helpers ---------- */
-  let painter = null, pageNumbers = false;
+  let painter = null, pageNumbers = false, savedRange = null;
+
+  /* Any ribbon control that takes focus — the size box, a colour input, a
+     menu button — moves the caret out of the editor. Calling editor.focus()
+     afterwards drops the caret at position 0, which is why applying a size
+     used to insert at the very top of the document instead of where you were
+     working. So remember the last caret position inside the editor and put it
+     back before acting on it. */
+  document.addEventListener('selectionchange', () => {
+    const s = window.getSelection();
+    if (!s || !s.rangeCount) return;
+    const r = s.getRangeAt(0);
+    if (el.editor.contains(r.commonAncestorContainer)) savedRange = r.cloneRange();
+  });
+
+  function focusEditor() {
+    const s = window.getSelection();
+    const inside = r => r && el.editor.contains(r.commonAncestorContainer);
+    if (s && s.rangeCount && inside(s.getRangeAt(0))) { el.editor.focus(); return; }
+    el.editor.focus();
+    const sel = window.getSelection();
+    if (inside(savedRange)) { sel.removeAllRanges(); sel.addRange(savedRange); return; }
+    // nothing remembered: put the caret at the end rather than the start
+    const r = document.createRange();
+    r.selectNodeContents(el.editor);
+    r.collapse(false);
+    sel.removeAllRanges(); sel.addRange(r);
+  }
 
   function insertHTML(html) {
-    el.editor.focus();
+    focusEditor();
     document.execCommand('insertHTML', false, html);
     refresh(); scheduleSave();
   }
@@ -306,7 +333,7 @@
     else if (mode === 'sentence') out = text.toLowerCase().replace(/(^\s*\w|[.!?]\s+\w)/g, c => c.toUpperCase());
     else if (mode === 'toggle') out = [...text].map(c =>
       c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()).join('');
-    el.editor.focus();
+    focusEditor();
     document.execCommand('insertText', false, out);
     refresh(); scheduleSave();
   }
@@ -330,7 +357,7 @@
     if (!st) return;
     const sel = getSelection();
     if (!sel.rangeCount || sel.isCollapsed) return;
-    el.editor.focus();
+    focusEditor();
     document.execCommand('removeFormat');
     if (st.bold) document.execCommand('bold');
     if (st.italic) document.execCommand('italic');
@@ -356,7 +383,7 @@
       String.fromCodePoint(cp).replace('&', '&amp;').replace('<', '&lt;') + '</button>').join('');
     el.symbolGrid.querySelectorAll('button').forEach(b =>
       b.addEventListener('click', () => {
-        el.editor.focus();
+        focusEditor();
         document.execCommand('insertText', false, String.fromCodePoint(+b.dataset.cp));
         el.symbolMenu.hidden = true; refresh(); scheduleSave();
       }));
@@ -379,7 +406,7 @@
   function applySize(px) {
     px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
     el.sizeInput.value = px;
-    el.editor.focus();
+    focusEditor();
 
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
@@ -464,7 +491,7 @@
       html += '</tr>';
     }
     html += '</tbody></table><div><br></div>';
-    el.editor.focus();
+    focusEditor();
     document.execCommand('insertHTML', false, html);
     refresh(); scheduleSave();
   }
@@ -535,9 +562,28 @@
       ' · ' + o.label;
     el.spacingVal.textContent = (+el.spacing.value).toFixed(1) + '×';
     el.marginVal.textContent = Math.round(+el.margin.value / 2.835) + 'mm';
+    syncPageHF();
     el.editor.classList.toggle('tracing', el.tracing.checked);
     el.editor.style.setProperty('--ls', el.spacing.value);
     el.convert.disabled = !text.trim();
+  }
+
+  /* Mirror the running header and footer onto the on-screen page so the
+     teacher sees what will print, the way Word's print layout does. */
+  function syncPageHF() {
+    const ht = (el.headerText.value || '').trim();
+    el.pageHeader.hidden = !ht;
+    el.pageHeader.firstElementChild.textContent = ht;
+    el.pageHeader.style.textAlign = el.headerAlign.value;
+    el.pageHeader.style.fontSize = (+el.headerSize.value || 11) + 'pt';
+    el.pageHeader.classList.toggle('ruled', el.headerRule.checked);
+
+    let ft = (el.footerText.value || '').trim();
+    if (pageNumbers) ft = ft ? ft + '   1 / n' : '1 / n';
+    el.pageFooter.hidden = !ft;
+    el.pageFooter.firstElementChild.textContent = ft;
+    el.pageFooter.style.textAlign = el.footerAlign.value;
+    el.pageFooter.style.fontSize = (+el.footerSize.value || 10) + 'pt';
   }
 
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));

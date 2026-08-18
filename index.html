@@ -7,8 +7,8 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=6">
-<link rel="stylesheet" href="css/ribbon.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=7">
+<link rel="stylesheet" href="css/ribbon.css?v=7">
 </head>
 <body>
 
@@ -296,8 +296,12 @@
 
 <!-- ===================== document ===================== -->
 <main class="stage">
-  <div id="editor" class="editor page" contenteditable="true" spellcheck="true"
-       aria-label="Document text"><div><br></div></div>
+  <div class="sheet">
+    <div id="pageHeader" class="pagehf top" hidden><span></span></div>
+    <div id="editor" class="editor page" contenteditable="true" spellcheck="true"
+         aria-label="Document text"><div><br></div></div>
+    <div id="pageFooter" class="pagehf bottom" hidden><span></span></div>
+  </div>
 </main>
 
 <!-- ===================== status bar ===================== -->
@@ -319,11 +323,11 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=6"></script>
-<script src="js/engine.js?v=6"></script>
-<script src="js/layout.js?v=6"></script>
-<script src="js/editor.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/font-data.js?v=7"></script>
+<script src="js/engine.js?v=7"></script>
+<script src="js/layout.js?v=7"></script>
+<script src="js/editor.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 <script>
 (function () {
   // ribbon tab switching
