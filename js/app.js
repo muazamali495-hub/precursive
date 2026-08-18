@@ -21,7 +21,7 @@
    'linkBtn','unlinkBtn','headerBtn','footerBtn','pageNumBtn','textBoxBtn',
    'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid',
    'headerMenu','headerText','headerAlign','headerSize','headerRule',
-   'footerMenu','footerText','footerAlign','footerSize','pageHeader','pageFooter']
+   'footerMenu','footerText','footerAlign','footerSize','pageHeader','pageFooter','tbOverlay']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -47,6 +47,7 @@
     try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
 
     wireToolbar();
+    wireTextBoxes();
     restore();
 
     el.editor.addEventListener('input', () => { refresh(); scheduleSave(); });
@@ -201,8 +202,13 @@
     });
 
     /* --- Insert: text --- */
-    el.textBoxBtn.addEventListener('click', () =>
-      insertHTML('<div class="textbox">Text box</div><div><br></div>'));
+    el.textBoxBtn.addEventListener('click', () => {
+      insertHTML('<div class="textbox" style="width:340px;height:120px">' +
+        '[Grab your reader&rsquo;s attention with a great quote, or use this space ' +
+        'to emphasise a key point.]</div><div><br></div>');
+      const boxes = el.editor.querySelectorAll('.textbox');
+      selectTextBox(boxes[boxes.length - 1]);
+    });
     el.wordArtBtn.addEventListener('click', () =>
       insertHTML('<div class="wordart">WordArt</div><div><br></div>'));
     el.dropCapBtn.addEventListener('click', () => applyToBlock(b => b.classList.toggle('dropcap')));
@@ -389,6 +395,83 @@
       }));
   }
 
+  /* ---------- resizable text boxes ----------
+   * The handles live in an overlay outside the editable area, so they can
+   * never be typed into, selected or deleted along with the text. Selecting a
+   * box only positions that overlay; the box itself stays ordinary editable
+   * content, which is what lets bold, size, colour and the rest work on the
+   * text inside it exactly as they do anywhere else.
+   */
+  let activeBox = null;
+
+  function selectTextBox(box) {
+    if (activeBox && activeBox !== box) activeBox.classList.remove('active');
+    activeBox = box || null;
+    if (!activeBox) { el.tbOverlay.hidden = true; return; }
+    activeBox.classList.add('active');
+    positionOverlay();
+  }
+
+  function positionOverlay() {
+    if (!activeBox) { el.tbOverlay.hidden = true; return; }
+    const stage = document.querySelector('.stage');
+    const b = activeBox.getBoundingClientRect(), s = stage.getBoundingClientRect();
+    el.tbOverlay.hidden = false;
+    el.tbOverlay.style.left = (b.left - s.left + stage.scrollLeft) + 'px';
+    el.tbOverlay.style.top = (b.top - s.top + stage.scrollTop) + 'px';
+    el.tbOverlay.style.width = b.width + 'px';
+    el.tbOverlay.style.height = b.height + 'px';
+  }
+
+  function wireTextBoxes() {
+    // clicking inside a box selects it; clicking anywhere else deselects
+    el.editor.addEventListener('mousedown', e => {
+      const box = e.target.closest && e.target.closest('.textbox');
+      if (box) selectTextBox(box);
+      else if (activeBox) selectTextBox(null);
+    });
+    document.addEventListener('mousedown', e => {
+      if (el.editor.contains(e.target) || el.tbOverlay.contains(e.target)) return;
+      if (activeBox) selectTextBox(null);
+    });
+    el.editor.addEventListener('input', () => { if (activeBox) positionOverlay(); });
+    document.querySelector('.stage').addEventListener('scroll', positionOverlay);
+    window.addEventListener('resize', positionOverlay);
+
+    el.tbOverlay.querySelectorAll('.tb-h').forEach(h => {
+      h.addEventListener('mousedown', ev => {
+        if (!activeBox) return;
+        ev.preventDefault(); ev.stopPropagation();
+        const dir = h.dataset.dir;
+        const start = { x: ev.clientX, y: ev.clientY,
+                        w: activeBox.offsetWidth, h: activeBox.offsetHeight };
+        // Clamp to the page width, but only trust a measurement that looks
+        // like a real laid-out page. A hidden or not-yet-composited view can
+        // report a few pixels, which would otherwise squash the box.
+        const measured = el.editor.clientWidth;
+        const maxW = measured > 200 ? measured : 4000;
+        const move = m => {
+          const dx = m.clientX - start.x, dy = m.clientY - start.y;
+          let w = start.w, ht = start.h;
+          if (dir.includes('e')) w = start.w + dx;
+          if (dir.includes('w')) w = start.w - dx;
+          if (dir.includes('s')) ht = start.h + dy;
+          if (dir.includes('n')) ht = start.h - dy;
+          activeBox.style.width = Math.max(60, Math.min(maxW, Math.round(w))) + 'px';
+          activeBox.style.height = Math.max(40, Math.round(ht)) + 'px';
+          positionOverlay();
+        };
+        const up = () => {
+          document.removeEventListener('mousemove', move);
+          document.removeEventListener('mouseup', up);
+          refresh(); scheduleSave();
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+      });
+    });
+  }
+
   /* ---------- font size ----------
    * execCommand('fontSize') is unusable here. It only understands the legacy
    * 1-7 scale, what it emits depends on styleWithCSS, and with a collapsed
@@ -563,6 +646,7 @@
     el.spacingVal.textContent = (+el.spacing.value).toFixed(1) + '×';
     el.marginVal.textContent = Math.round(+el.margin.value / 2.835) + 'mm';
     syncPageHF();
+    if (activeBox && el.editor.contains(activeBox)) positionOverlay(); else if (activeBox) selectTextBox(null);
     el.editor.classList.toggle('tracing', el.tracing.checked);
     el.editor.style.setProperty('--ls', el.spacing.value);
     el.convert.disabled = !text.trim();
@@ -699,6 +783,21 @@
         drawRunningFooter(P, page, font, KEY, o, pi + 1, pages.length);
 
         for (const item of lines) {
+          if (item.kind === 'textbox') {
+            const bx = o.marginL + item.x, byTop = top - item.y, byBot = byTop - item.h;
+            page.pushOperators(
+              P.pushGraphicsState(), P.setLineWidth(0.8), P.setStrokingRgbColor(0.55, 0.60, 0.66),
+              P.moveTo(bx, byBot), P.lineTo(bx + item.w, byBot),
+              P.lineTo(bx + item.w, byTop), P.lineTo(bx, byTop),
+              P.closePath(), P.stroke(), P.popGraphicsState());
+            for (const ln of item.lines) {
+              drawLineItems(P, page, font, KEY, ln, bx + item.pad, byTop - item.pad - ln.dy, tracing);
+              if (ln.listMark)
+                drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
+                        bx + item.pad + ln.indent, byTop - item.pad - ln.dy, tracing);
+            }
+            continue;
+          }
           if (item.kind === 'image') {
             const img = imgCache.get(item.src);
             if (img) page.drawImage(img, { x: o.marginL + item.x, y: top - item.y - item.h,

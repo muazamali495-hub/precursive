@@ -168,9 +168,15 @@
         else if (tag === 'LI') pushPara(child, list, level);
         else if (tag === 'IMG') doc.push({ type:'image', src: child.getAttribute('src'),
                                            w: child.naturalWidth || 0, h: child.naturalHeight || 0 });
+        else if (BLOCK.test(tag) && child.classList && child.classList.contains('textbox')) {
+          const px = v => (parseFloat(v) || 0) * 0.75;      // CSS px -> points
+          doc.push({ type: 'textbox',
+                     w: px(child.style.width) || 0, h: px(child.style.height) || 0,
+                     paras: parseDocument(child, baseSize) });
+        }
         else if (BLOCK.test(tag)) {
           // a block may itself contain a table (execCommand wraps things)
-          if (child.querySelector(':scope > table')) descend(child, list, level);
+          if (child.querySelector(':scope > table, :scope > .textbox, :scope > img, :scope > hr')) descend(child, list, level);
           else pushPara(child, null, 0);
         }
       }
@@ -190,6 +196,7 @@
   /* Flatten a model back to plain text (for folding, counts, autosave preview) */
   function docText(doc) {
     return doc.map(b => {
+      if (b.type === 'textbox') return b.paras.map(p => docText([p])).join('\n');
       if (b.type && b.type !== 'table') return '';
       if (b.type === 'table')
         return b.rows.map(r => r.map(c => docText(c.paras)).join('\t')).join('\n');
@@ -215,6 +222,8 @@
       return Object.assign({}, r, { text: res.text });
     });
     const foldBlocks = blocks => blocks.map(b => {
+      if (b.type === 'textbox')
+        return { type:'textbox', w:b.w, h:b.h, paras: foldBlocks(b.paras) };
       if (b.type && b.type !== 'table') return b;
       if (b.type === 'table') return {
         type: 'table', cols: b.cols,

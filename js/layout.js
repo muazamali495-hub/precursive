@@ -201,6 +201,27 @@
         continue;
       }
 
+      if (block && block.type === 'textbox') {
+        const pad = 6;
+        const w = Math.min(colW, block.w || colW);
+        const inner = Math.max(20, w - pad * 2);
+        let lines = [], ch = 0;
+        for (const para of block.paras) {
+          const ls = layoutParagraph(font, para, inner, opts);
+          for (let i = 0; i < ls.length; i++) {
+            positionLine(ls[i], inner, para.align || 'left', i === ls.length - 1);
+            ls[i].dy = ch + ls[i].ascent;
+            ch += ls[i].height;
+          }
+          lines = lines.concat(ls);
+        }
+        // honour the dragged size, but never clip the text it holds
+        const h = Math.max(block.h || 0, ch + pad * 2);
+        if (y + h > usableH && page.length) newPage();
+        page.push({ kind: 'textbox', x: 0, w: w, h: h, pad: pad, lines: lines, y: y });
+        y += h + 6;
+        continue;
+      }
       if (block && block.type === 'image') {
         // scale to fit the column, converting CSS px to points
         const natW = (block.w || 400) * 0.75, natH = (block.h || 300) * 0.75;
