@@ -145,10 +145,16 @@ Money: £25.00 and €30 — a fair price.`;
       // let the browser paint the busy state before the heavy work
       await new Promise(r => setTimeout(r, 20));
 
-      const { PDFDocument, PDFOperator, pushGraphicsState, popGraphicsState,
+      const { PDFDocument, PDFOperator, PDFName, pushGraphicsState, popGraphicsState,
               beginText, endText, setFontAndSize, setTextMatrix,
               setFillingRgbColor, moveTo, lineTo, stroke, setStrokingRgbColor,
               setLineWidth } = PDFLib;
+
+      // Resource key for the font on each page. Because we write raw operators
+      // instead of page.drawText(), pdf-lib does NOT register the font in the
+      // page's /Resources /Font dictionary for us — without this every viewer
+      // falls back to a default face and the handwriting never appears.
+      const FONT_KEY = 'F1';
 
       const doc = await PDFDocument.create();
       doc.registerFontkit(window.fontkit);
@@ -174,6 +180,7 @@ Money: £25.00 and €30 — a fair price.`;
 
       for (const pgLines of pages) {
         const page = doc.addPage([ps.w, ps.h]);
+        page.node.setFontDictionary(PDFName.of(FONT_KEY), font.ref);
         const top = ps.h - margin - FONT.ASC * S;
 
         pgLines.forEach((ln, i) => {
@@ -208,7 +215,7 @@ Money: £25.00 and €30 — a fair price.`;
             pushGraphicsState(),
             setFillingRgbColor(0.106, 0.129, 0.161),
             beginText(),
-            setFontAndSize(font.name, size),
+            setFontAndSize(FONT_KEY, size),
             setTextMatrix(1, 0, 0, 1, margin, baseY),
             PDFOperator.of('TJ', ['[' + parts.join(' ') + ']']),
             endText(),
