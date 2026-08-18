@@ -13,7 +13,9 @@
   const el = {};
   ['editor','convert','sizeSel','pageSize','orientation','rules','tracing','worksheet',
    'spacing','spacingVal','margin','marginVal','notice','noticeText','noticeDetails',
-   'stats','sample','clear','status','year','colorBtn','colorInput','wsName','wsFields']
+   'stats','sample','clear','status','year','colorBtn','colorInput','wsName','wsFields',
+   'sizeInput','sizeUp','sizeDown','hlBtn','hlInput','tableBtn','tableMenu','tableRows',
+   'tableCols','tableHeader','tableInsert','pageBreakBtn']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -78,10 +80,13 @@
       b.addEventListener('mousedown', e => e.preventDefault());   // keep selection
       b.addEventListener('click', () => exec(b.dataset.cmd, b.dataset.val));
     });
-    el.sizeSel.addEventListener('change', () => {
-      const px = el.sizeSel.value;
+    /* Size: any value from 1 to 300. execCommand's fontSize only accepts the
+       legacy 1-7 scale, so tag the selection with size 7 and immediately
+       rewrite those <font> tags to a real pixel size. */
+    const applySize = px => {
+      px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
+      el.sizeInput.value = px;
       el.editor.focus();
-      // execCommand fontSize only takes 1-7, so tag then rewrite to a real px size
       document.execCommand('fontSize', false, '7');
       el.editor.querySelectorAll('font[size="7"]').forEach(f => {
         const s = document.createElement('span');
@@ -90,12 +95,66 @@
         f.replaceWith(s);
       });
       refresh(); scheduleSave();
+    };
+    el.sizeInput.addEventListener('change', () => applySize(el.sizeInput.value));
+    el.sizeInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); applySize(el.sizeInput.value); }
     });
+    el.sizeDown.addEventListener('click', () => applySize(stepSize(-1)));
+    el.sizeUp.addEventListener('click',   () => applySize(stepSize(+1)));
+
     el.colorBtn.addEventListener('click', () => el.colorInput.click());
     el.colorInput.addEventListener('input', () => {
       el.colorBtn.style.setProperty('--swatch', el.colorInput.value);
       exec('foreColor', el.colorInput.value);
     });
+    el.hlBtn.addEventListener('click', () => el.hlInput.click());
+    el.hlInput.addEventListener('input', () => {
+      el.hlBtn.style.setProperty('--swatch', el.hlInput.value);
+      exec('hiliteColor', el.hlInput.value);
+    });
+
+    el.tableBtn.addEventListener('click', () => el.tableMenu.hidden = !el.tableMenu.hidden);
+    el.tableInsert.addEventListener('click', () => {
+      insertTable(Math.max(1, Math.min(12, +el.tableRows.value || 2)),
+                  Math.max(1, Math.min(8,  +el.tableCols.value || 2)),
+                  el.tableHeader.checked);
+      el.tableMenu.hidden = true;
+    });
+    document.addEventListener('click', e => {
+      if (!el.tableMenu.hidden && !el.tableMenu.contains(e.target) && e.target !== el.tableBtn)
+        el.tableMenu.hidden = true;
+    });
+    el.pageBreakBtn.addEventListener('click', () => {
+      el.editor.focus();
+      document.execCommand('insertHTML', false, '<hr class="pgbreak"><div><br></div>');
+      refresh(); scheduleSave();
+    });
+  }
+
+  const MIN_SIZE = 1, MAX_SIZE = 300;
+  const SIZE_STEPS = [8,9,10,11,12,14,16,18,20,24,28,32,40,48,56,72,96,120,150,200,250,300];
+  function stepSize(dir) {
+    const cur = +el.sizeInput.value || NTEditor.DEFAULT_SIZE;
+    if (dir < 0) { for (let i = SIZE_STEPS.length - 1; i >= 0; i--) if (SIZE_STEPS[i] < cur) return SIZE_STEPS[i]; return MIN_SIZE; }
+    for (const s of SIZE_STEPS) if (s > cur) return s;
+    return MAX_SIZE;
+  }
+
+  function insertTable(rows, cols, withHeader) {
+    let html = '<table class="pc-table"><tbody>';
+    for (let r = 0; r < rows; r++) {
+      html += '<tr>';
+      for (let c = 0; c < cols; c++) {
+        const th = withHeader && r === 0;
+        html += th ? '<th><br></th>' : '<td><br></td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table><div><br></div>';
+    el.editor.focus();
+    document.execCommand('insertHTML', false, html);
+    refresh(); scheduleSave();
   }
 
   function syncToolbarState() {
@@ -254,30 +313,21 @@
 
         if (worksheet) drawWorksheetHeader(P, page, font, KEY, o);
 
-        for (const ln of lines) {
+        for (const item of lines) {
+          if (item.kind === 'row') {
+            drawTableRow(P, page, font, KEY, o, item.row, top - item.y, tracing);
+            continue;
+          }
+          const ln = item.line;
           const baseY = top - ln.y;
 
           if (showRules) drawRules(P, page, o, baseY, ln);
 
-          // bullet / number
           if (ln.listMark) {
             drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
                     o.marginL + ln.indent, baseY, tracing);
           }
-          for (const it of ln.items) {
-            if (!it.text.trim()) continue;
-            drawRun(P, page, font, KEY, it.text, it.style, o.marginL + it.x, baseY, tracing);
-            if (it.style.u) {
-              const th = Math.max(0.5, it.style.size * 0.045);
-              const uy = baseY - it.style.size * 0.10;
-              const c = NTEditor.rgbToArr(it.style.color);
-              page.pushOperators(
-                P.pushGraphicsState(), P.setStrokingRgbColor(c[0], c[1], c[2]),
-                P.setLineWidth(th),
-                P.moveTo(o.marginL + it.x, uy), P.lineTo(o.marginL + it.x + it.w, uy),
-                P.stroke(), P.popGraphicsState());
-            }
-          }
+          drawLineItems(P, page, font, KEY, ln, o.marginL, baseY, tracing);
         }
         if (pages.length > 1) drawPageNumber(P, page, font, KEY, o, pi + 1, pages.length);
       });
@@ -291,6 +341,64 @@
       setStatus('Something went wrong: ' + e.message, true);
     } finally {
       el.convert.classList.remove('busy'); el.convert.disabled = false;
+    }
+  }
+
+  /* Draw every item on one laid-out line, plus any underline/highlight. */
+  function drawLineItems(P, page, font, KEY, ln, originX, baseY, tracing) {
+    for (const it of ln.items) {
+      if (!it.text.trim()) continue;
+      const x = originX + it.x;
+      if (it.style.hl) {
+        const h = NTEditor.rgbToArr(it.style.hl);
+        page.pushOperators(
+          P.pushGraphicsState(), P.setFillingRgbColor(h[0], h[1], h[2]),
+          P.moveTo(x - 1, baseY - it.style.size * 0.24),
+          P.lineTo(x + it.w + 1, baseY - it.style.size * 0.24),
+          P.lineTo(x + it.w + 1, baseY + it.style.size * 0.72),
+          P.lineTo(x - 1, baseY + it.style.size * 0.72),
+          P.closePath(), P.fill(), P.popGraphicsState());
+      }
+      drawRun(P, page, font, KEY, it.text, it.style, x, baseY, tracing);
+      if (it.style.u) {
+        const th = Math.max(0.5, it.style.size * 0.045);
+        const uy = baseY - it.style.size * 0.10;
+        const c = NTEditor.rgbToArr(it.style.color);
+        page.pushOperators(
+          P.pushGraphicsState(), P.setStrokingRgbColor(c[0], c[1], c[2]),
+          P.setLineWidth(th), P.moveTo(x, uy), P.lineTo(x + it.w, uy),
+          P.stroke(), P.popGraphicsState());
+      }
+    }
+  }
+
+  /* Draw one table row: cell borders, an optional header tint, then the
+     cell text at its own offset inside the cell. */
+  function drawTableRow(P, page, font, KEY, o, row, topY, tracing) {
+    const x0 = o.marginL, pad = row.pad;
+    const bottomY = topY - row.height;
+
+    for (const cell of row.cells) {
+      const cx = x0 + cell.x, cw = cell.w;
+      if (cell.header) {
+        page.pushOperators(
+          P.pushGraphicsState(), P.setFillingRgbColor(0.93, 0.95, 0.97),
+          P.moveTo(cx, bottomY), P.lineTo(cx + cw, bottomY),
+          P.lineTo(cx + cw, topY), P.lineTo(cx, topY),
+          P.closePath(), P.fill(), P.popGraphicsState());
+      }
+      page.pushOperators(
+        P.pushGraphicsState(), P.setLineWidth(0.7), P.setStrokingRgbColor(0.55, 0.6, 0.66),
+        P.moveTo(cx, bottomY), P.lineTo(cx + cw, bottomY),
+        P.lineTo(cx + cw, topY), P.lineTo(cx, topY), P.closePath(),
+        P.stroke(), P.popGraphicsState());
+
+      for (const ln of cell.lines) {
+        drawLineItems(P, page, font, KEY, ln, cx + pad, topY - pad - ln.dy, tracing);
+        if (ln.listMark)
+          drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
+                  cx + pad + ln.indent, topY - pad - ln.dy, tracing);
+      }
     }
   }
 

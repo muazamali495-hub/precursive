@@ -1,6 +1,15 @@
-# Pre-Cursive — text → handwriting PDF
+# Pre-Cursive Editor — handwriting worksheets as PDF
 
-Paste text, press one button, download a PDF set in the NTPreCursive handwriting face.
+A small word processor for the NTPreCursive handwriting face. Write and format
+text, then download it as a PDF.
+
+**Editing:** bold, italic, underline, text size (1–300pt), colour, highlight,
+four alignments, bullet and numbered lists, indent, tables, page breaks,
+undo/redo, word count, autosave.
+
+**Teaching aids Word cannot provide:** hollow tracing outlines, four-line
+handwriting guides drawn from the font's own metrics, and a Name/Date
+worksheet header.
 
 Everything runs in the visitor's browser. There is no server, no build step and no
 external request at runtime — which is what makes it free to host forever.
@@ -37,7 +46,9 @@ empty and set the output directory to `/`.
 |---|---|
 | `index.html` | Markup |
 | `css/style.css` | Styling, light + dark themes |
-| `js/engine.js` | TrueType parser, character folding, line breaking, kerning |
+| `js/engine.js` | TrueType parser, character folding, kerning |
+| `js/layout.js` | Styled-run line breaking, tables, pagination |
+| `js/editor.js` | contenteditable surface and DOM → document model |
 | `js/app.js` | UI wiring and PDF generation |
 | `js/font-data.js` | The font, base64-encoded |
 | `vendor/` | pdf-lib + fontkit (vendored, not from a CDN) |
@@ -57,6 +68,14 @@ the real kern values:
 ```
 
 The same parser also detects what the font genuinely supports.
+
+## Synthetic bold and italic
+
+The font ships **one style**: `macStyle 0`, `usWeightClass 400`, no bold or
+italic companion file. Real bold/italic is therefore impossible, so both are
+synthesised at draw time — bold via PDF text rendering mode 2 (fill + stroke),
+italic via a sheared text matrix. Measurement adds the bold stroke width, or
+bold text would silently overflow its line.
 
 ## Known limits of this font (handled, not hidden)
 
@@ -83,3 +102,14 @@ Serving the `.ttf` from a public site is redistribution, which that flag does no
 itself grant. If that matters for your deployment, `js/font-data.js` is the only
 place the font is bound in — swapping in a differently-licensed face is a one-file
 change, and `engine.js` parses any TrueType font.
+
+## Two pdf-lib traps worth remembering
+
+1. pdf-lib reads **GPOS only** for kerning. This font has none, so all 303
+   `kern` pairs are applied by hand via the `TJ` operator.
+2. Writing raw operators means pdf-lib does **not** register the font in the
+   page’s `/Resources /Font` dictionary. Without an explicit
+   `setFontDictionary`, every viewer silently falls back to a default face.
+3. Passing a raw JavaScript number to `PDFOperator.of` **silently empties the
+   entire content stream** — no error, just a blank page. Use pdf-lib’s typed
+   helpers (`setTextRenderingMode`, `setLineWidth`, …).

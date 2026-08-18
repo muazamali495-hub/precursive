@@ -141,8 +141,48 @@
     return line;
   }
 
+  /* ---------- tables ----------
+   * Columns split the text width equally. Each cell holds its own paragraphs,
+   * laid out inside (cellWidth - 2*padding). A row is as tall as its tallest
+   * cell, and rows are atomic when paginating — a row never splits across a
+   * page boundary, which is what keeps a table readable.
+   */
+  function layoutTable(font, table, colW, opts) {
+    const n = Math.max(1, table.cols);
+    const pad = opts.cellPad != null ? opts.cellPad : 6;
+    const cw = colW / n;
+    const inner = Math.max(12, cw - pad * 2);
+    const rows = [];
+
+    for (const row of table.rows) {
+      const cells = [];
+      let tallest = 0;
+      for (let c = 0; c < n; c++) {
+        const src = row[c] || { paras: [] };
+        const paras = src.paras && src.paras.length ? src.paras
+                    : [{ align: 'left', runs: [{ text: '', size: opts.baseSize }] }];
+        let lines = [], h = 0;
+        for (const para of paras) {
+          const ls = layoutParagraph(font, para, inner, opts);
+          for (let i = 0; i < ls.length; i++) {
+            positionLine(ls[i], inner, para.align || 'left', i === ls.length - 1);
+            ls[i].dy = h + ls[i].ascent;
+            h += ls[i].height;
+          }
+          lines = lines.concat(ls);
+        }
+        cells.push({ lines, x: c * cw, w: cw, header: !!src.header });
+        if (h > tallest) tallest = h;
+      }
+      rows.push({ cells, height: tallest + pad * 2, pad, cw, cols: n });
+    }
+    return rows;
+  }
+
   /* Flow a whole document into pages.
-   * doc = [para]; returns [{ lines:[{...,y}] }]
+   * doc = [ para | {type:'table',...} | {type:'pagebreak'} ]
+   * Returns [ [ item ] ] where item is {kind:'line'|'row', ..., y}
+   * y is the distance DOWN from the top text edge.
    */
   function flow(font, doc, opts) {
     const colW = opts.pageW - opts.marginL - opts.marginR;
@@ -150,7 +190,29 @@
     const pages = [];
     let page = [], y = 0, olCount = 0;
 
-    for (const para of doc) {
+    const newPage = () => { pages.push(page); page = []; y = 0; };
+
+    for (const block of doc) {
+      if (block && block.type === 'pagebreak') {
+        if (page.length) newPage();
+        continue;
+      }
+
+      if (block && block.type === 'table') {
+        const rows = layoutTable(font, block, colW, opts);
+        for (const row of rows) {
+          // a row taller than a whole page can only be placed as-is
+          if (y + row.height > usableH && page.length) newPage();
+          row.y = y;
+          page.push({ kind: 'row', row: row, y: y });
+          y += row.height;
+        }
+        y += (opts.paraSpacing || 0) + 4;
+        olCount = 0;
+        continue;
+      }
+
+      const para = block;
       if (para.list === 'ol') olCount++; else olCount = 0;
       const lines = layoutParagraph(font, para, colW, {
         baseSize: opts.baseSize, lineSpacing: opts.lineSpacing,
@@ -158,10 +220,10 @@
       });
       lines.forEach((ln, idx) => {
         positionLine(ln, colW, para.align || 'left', idx === lines.length - 1);
-        if (y + ln.height > usableH && page.length) { pages.push(page); page = []; y = 0; }
+        if (y + ln.height > usableH && page.length) newPage();
         ln.y = y + ln.ascent;
         y += ln.height;
-        page.push(ln);
+        page.push({ kind: 'line', line: ln, y: ln.y });
       });
       y += (opts.paraSpacing || 0);
     }
@@ -170,7 +232,7 @@
   }
 
   global.NTLayout = {
-    runWidth, layoutParagraph, positionLine, flow,
+    runWidth, layoutParagraph, layoutTable, positionLine, flow,
     BOLD_STROKE, ITALIC_SKEW
   };
 })(window);

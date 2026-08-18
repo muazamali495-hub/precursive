@@ -322,3 +322,73 @@ button { font: inherit; cursor: pointer; }
   .toolbar { position: static; }
   .opt-grid { grid-template-columns: 1fr; }
 }
+
+/* ================= v3: size input, highlight, tables, page break ========= */
+
+.sizebox { align-items: center; }
+.tnum {
+  width: 58px; height: 34px; text-align: center;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: 13px; font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+}
+.tnum::-webkit-outer-spin-button, .tnum::-webkit-inner-spin-button {
+  -webkit-appearance: none; margin: 0;
+}
+.tb.hl::after { background: var(--swatch, #ffe680); }
+
+/* ---------- table insert popover ---------- */
+.tablewrap { position: relative; }
+.popmenu {
+  position: absolute; top: 40px; left: 0; z-index: 40; width: 218px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 11px; box-shadow: var(--shadow-lg); padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.popttl {
+  margin: 0; font-size: 11.5px; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 600;
+}
+.poprow { display: flex; gap: 8px; }
+.poprow label {
+  flex: 1; display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--ink-soft);
+}
+.poprow input {
+  width: 100%; padding: 6px 8px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  font: inherit; font-size: 13px;
+}
+.popchk { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-soft); }
+.popbtn {
+  padding: 8px; border: 0; border-radius: 8px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 13px; font-weight: 600;
+}
+.popbtn:hover { filter: brightness(1.06); }
+
+/* ---------- tables inside the editor ---------- */
+.editor table.pc-table {
+  border-collapse: collapse; width: 100%; margin: 8px 0;
+  table-layout: fixed;
+}
+.editor table.pc-table td, .editor table.pc-table th {
+  border: 1px solid #8d99a6; padding: 5px 7px;
+  vertical-align: top; text-align: left; font-weight: inherit;
+  overflow-wrap: break-word;
+}
+.editor table.pc-table th { background: #eef2f6; }
+
+/* ---------- page break marker ---------- */
+.editor hr.pgbreak {
+  border: 0; border-top: 2px dashed #9bb3c4; margin: 14px 0;
+  position: relative; overflow: visible;
+}
+.editor hr.pgbreak::after {
+  content: 'page break';
+  position: absolute; top: -9px; left: 50%; transform: translateX(-50%);
+  background: var(--paper); padding: 0 8px;
+  font-family: var(--font-ui); font-size: 10px; letter-spacing: .06em;
+  text-transform: uppercase; color: #7d94a6;
+}

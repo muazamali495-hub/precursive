@@ -45,6 +45,16 @@
     return [0.106, 0.129, 0.161];
   }
 
+  /* execCommand leaves 'transparent' or a zero-alpha rgba behind when a
+     highlight is cleared; those must not become a painted rectangle. */
+  function isTransparent(c) {
+    if (!c) return true;
+    const s = String(c).trim().toLowerCase();
+    if (s === 'transparent' || s === 'initial' || s === 'inherit') return true;
+    const m = /^rgba\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*,\s*([\d.]+)\s*\)$/.exec(s);
+    return !!m && parseFloat(m[1]) === 0;
+  }
+
   function alignOf(el) {
     const a = (el.style && el.style.textAlign) || el.getAttribute?.('align') || '';
     return ['center', 'right', 'justify'].includes(a) ? a : 'left';
@@ -64,7 +74,8 @@
             text: t,
             size: inherited.size || baseSize,
             b: !!inherited.b, i: !!inherited.i, u: !!inherited.u,
-            color: inherited.color || null
+            color: inherited.color || null,
+            hl: inherited.hl || null
           });
           return;
         }
@@ -81,6 +92,7 @@
           if (st.fontStyle === 'italic') s.i = true;
           if ((st.textDecorationLine || st.textDecoration || '').includes('underline')) s.u = true;
           if (st.color) s.color = st.color;
+          if (st.backgroundColor && !isTransparent(st.backgroundColor)) s.hl = st.backgroundColor;
           if (st.fontSize && st.fontSize.endsWith('px')) s.size = parseFloat(st.fontSize);
         }
         if (tag === 'H1') s.size = baseSize * 1.9, s.b = true;
@@ -95,7 +107,8 @@
         if (r.br) { merged.push(r); continue; }
         const last = merged[merged.length - 1];
         if (last && !last.br && last.size === r.size && last.b === r.b &&
-            last.i === r.i && last.u === r.u && last.color === r.color) last.text += r.text;
+            last.i === r.i && last.u === r.u && last.color === r.color &&
+            last.hl === r.hl) last.text += r.text;
         else merged.push(r);
       }
       // a <br> splits into separate paragraphs
@@ -109,13 +122,39 @@
       emit();
     }
 
+    /* A <table> becomes one block; each cell carries its own paragraph list,
+       parsed by recursing with a fresh sub-document. */
+    function pushTable(tableEl) {
+      const trs = [...tableEl.querySelectorAll('tr')];
+      if (!trs.length) return;
+      let cols = 0;
+      for (const tr of trs) cols = Math.max(cols, tr.children.length);
+      const rows = trs.map(tr => {
+        const cells = [];
+        for (let c = 0; c < cols; c++) {
+          const td = tr.children[c];
+          if (!td) { cells.push({ paras: [], header: false }); continue; }
+          const sub = parseDocument(td, baseSize);
+          cells.push({ paras: sub, header: td.tagName === 'TH' });
+        }
+        return cells;
+      });
+      doc.push({ type: 'table', cols, rows });
+    }
+
     function descend(el, list, level) {
       for (const child of el.children) {
         const tag = child.tagName;
-        if (tag === 'UL') descend(child, 'ul', (level || 0) + (list ? 1 : 0));
+        if (tag === 'TABLE') pushTable(child);
+        else if (tag === 'HR') doc.push({ type: 'pagebreak' });
+        else if (tag === 'UL') descend(child, 'ul', (level || 0) + (list ? 1 : 0));
         else if (tag === 'OL') descend(child, 'ol', (level || 0) + (list ? 1 : 0));
         else if (tag === 'LI') pushPara(child, list, level);
-        else if (BLOCK.test(tag)) pushPara(child, null, 0);
+        else if (BLOCK.test(tag)) {
+          // a block may itself contain a table (execCommand wraps things)
+          if (child.querySelector(':scope > table')) descend(child, list, level);
+          else pushPara(child, null, 0);
+        }
       }
       // loose text directly inside the editor (before the first block)
       const loose = [...el.childNodes].filter(n =>
@@ -132,25 +171,41 @@
 
   /* Flatten a model back to plain text (for folding, counts, autosave preview) */
   function docText(doc) {
-    return doc.map(p => p.runs.map(r => r.text).join('')).join('\n');
+    return doc.map(b => {
+      if (b.type === 'pagebreak') return '';
+      if (b.type === 'table')
+        return b.rows.map(r => r.map(c => docText(c.paras)).join('\t')).join('\n');
+      return b.runs.map(r => r.text).join('');
+    }).join('\n');
   }
 
-  /* Apply character folding to every run, preserving styling. */
+  /* Apply character folding to every run, preserving styling. Recurses into
+     table cells so nothing in a table escapes the coverage check. */
   function foldDocument(font, doc, foldFn) {
     const changes = new Map(), lost = new Map();
-    const out = doc.map(p => ({
-      align: p.align, list: p.list, level: p.level,
-      runs: p.runs.map(r => {
-        const res = foldFn(font, r.text);
-        res.changes.forEach((v, k) => {
-          if (!changes.has(k)) changes.set(k, { to: v.to, count: 0 });
-          changes.get(k).count += v.count;
-        });
-        res.lost.forEach((n, k) => lost.set(k, (lost.get(k) || 0) + n));
-        return Object.assign({}, r, { text: res.text });
-      })
-    }));
-    return { doc: out, changes, lost };
+
+    const collect = res => {
+      res.changes.forEach((v, k) => {
+        if (!changes.has(k)) changes.set(k, { to: v.to, count: 0 });
+        changes.get(k).count += v.count;
+      });
+      res.lost.forEach((n, k) => lost.set(k, (lost.get(k) || 0) + n));
+    };
+    const foldRuns = runs => runs.map(r => {
+      const res = foldFn(font, r.text);
+      collect(res);
+      return Object.assign({}, r, { text: res.text });
+    });
+    const foldBlocks = blocks => blocks.map(b => {
+      if (b.type === 'pagebreak') return b;
+      if (b.type === 'table') return {
+        type: 'table', cols: b.cols,
+        rows: b.rows.map(row => row.map(c => ({ header: c.header, paras: foldBlocks(c.paras) })))
+      };
+      return { align: b.align, list: b.list, level: b.level, runs: foldRuns(b.runs) };
+    });
+
+    return { doc: foldBlocks(doc), changes, lost };
   }
 
   global.NTEditor = { parseDocument, docText, foldDocument, rgbToArr, DEFAULT_SIZE };

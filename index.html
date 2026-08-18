@@ -36,15 +36,17 @@
       <button class="tb u"   data-cmd="underline" title="Underline (Ctrl+U)" type="button">U</button>
     </div>
     <span class="tsep"></span>
+    <div class="tgroup sizebox">
+      <button id="sizeDown" class="tb" title="Smaller" type="button">−</button>
+      <input id="sizeInput" class="tnum" type="number" min="1" max="300" step="1" value="18"
+             title="Text size (1–300)" aria-label="Text size, 1 to 300">
+      <button id="sizeUp" class="tb" title="Larger" type="button">+</button>
+    </div>
     <div class="tgroup">
-      <select id="sizeSel" class="tsel" title="Text size" aria-label="Text size">
-        <option value="" selected>Size</option>
-        <option value="14">14</option><option value="18">18</option>
-        <option value="24">24</option><option value="30">30</option>
-        <option value="40">40</option><option value="56">56</option>
-      </select>
       <button id="colorBtn" class="tb swatch" title="Text colour" type="button">A</button>
       <input id="colorInput" type="color" value="#1b2129" hidden>
+      <button id="hlBtn" class="tb swatch hl" title="Highlight" type="button">▮</button>
+      <input id="hlInput" type="color" value="#ffe680" hidden>
     </div>
     <span class="tsep"></span>
     <div class="tgroup">
@@ -59,6 +61,20 @@
       <button class="tb" data-cmd="insertOrderedList"   title="Numbered list" type="button">1—</button>
       <button class="tb" data-cmd="outdent" title="Decrease indent" type="button">⇤</button>
       <button class="tb" data-cmd="indent"  title="Increase indent" type="button">⇥</button>
+    </div>
+    <span class="tsep"></span>
+    <div class="tgroup tablewrap">
+      <button id="tableBtn" class="tb" title="Insert table" type="button">▦</button>
+      <div id="tableMenu" class="popmenu" hidden>
+        <p class="popttl">Insert table</p>
+        <div class="poprow">
+          <label>Rows <input id="tableRows" type="number" min="1" max="12" value="3"></label>
+          <label>Columns <input id="tableCols" type="number" min="1" max="8" value="3"></label>
+        </div>
+        <label class="popchk"><input id="tableHeader" type="checkbox" checked> Header row</label>
+        <button id="tableInsert" class="popbtn" type="button">Insert</button>
+      </div>
+      <button id="pageBreakBtn" class="tb" title="Page break" type="button">⤓</button>
     </div>
     <span class="tsep"></span>
     <div class="tgroup">
