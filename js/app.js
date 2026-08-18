@@ -252,7 +252,11 @@
       if (!f) return;
       const rd = new FileReader();
       rd.onload = () => {
-        insertHTML('<div><img src="' + rd.result + '" alt=""></div><div><br></div>');
+        // load first so we know the natural size, then fit it sensibly
+        const probe = new Image();
+        probe.onload = () => insertImage(rd.result, probe.naturalWidth, probe.naturalHeight);
+        probe.onerror = () => insertImage(rd.result, 320, 240);
+        probe.src = rd.result;
       };
       rd.readAsDataURL(f);
       el.pictureInput.value = '';
@@ -291,9 +295,9 @@
 
     /* --- Insert: text --- */
     el.textBoxBtn.addEventListener('click', () => {
-      insertHTML('<div class="textbox" style="width:340px;height:120px">' +
+      insertHTML('<div class="textbox" style="width:340px;height:120px"><div>' +
         '[Grab your reader&rsquo;s attention with a great quote, or use this space ' +
-        'to emphasise a key point.]</div><div><br></div>');
+        'to emphasise a key point.]</div></div><div><br></div>');
       const boxes = el.editor.querySelectorAll('.textbox');
       selectTextBox(boxes[boxes.length - 1]);
     });
@@ -498,6 +502,39 @@
       }));
   }
 
+  /* Insert an image as a resizable wrapper. If a text box is currently
+     selected, the image goes inside that box and flows with its text;
+     otherwise it is placed as its own block in the document. */
+  function insertImage(src, natW, natH) {
+    // target the selected box, or the box the caret is currently inside
+    let box = (activeBox && el.editor.contains(activeBox)) ? activeBox : null;
+    if (!box) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        let n = sel.getRangeAt(0).commonAncestorContainer;
+        if (n.nodeType === 3) n = n.parentNode;
+        const t = n && n.closest ? n.closest('.textbox') : null;
+        if (t && el.editor.contains(t)) box = t;
+      }
+    }
+    const room = box ? Math.max(60, (box.clientWidth || 300) - 24)
+                     : (Math.max(120, el.editor.clientWidth - 8) || 480);
+    let w = natW || 320, h = natH || 240;
+    if (w > room) { h = Math.round(h * room / w); w = Math.round(room); }
+    const html = '<span class="img-wrap" contenteditable="false" style="width:' + w + 'px;height:' + h +
+                 'px"><img src="' + src + '" alt=""></span>';
+    if (box) {
+      // append straight into the box via the DOM — reliable, unlike
+      // execCommand into a nested editable after the async file read
+      const frag = document.createRange().createContextualFragment('<div>' + html + '</div>');
+      box.appendChild(frag);
+      selectTextBox(box);
+    } else {
+      insertHTML('<div>' + html + '</div><div><br></div>');
+    }
+    refresh(); scheduleSave();
+  }
+
   /* ---------- resizable text boxes ----------
    * The handles live in an overlay outside the editable area, so they can
    * never be typed into, selected or deleted along with the text. Selecting a
@@ -507,12 +544,20 @@
    */
   let activeBox = null;
 
+  let boxObserver = null;
   function selectTextBox(box) {
     if (activeBox && activeBox !== box) activeBox.classList.remove('active');
+    if (boxObserver) { boxObserver.disconnect(); boxObserver = null; }
     activeBox = box || null;
     if (!activeBox) { el.tbOverlay.hidden = true; return; }
     activeBox.classList.add('active');
     positionOverlay();
+    // the browser's native resize grip changes the box size without a mouse
+    // handler firing; a ResizeObserver keeps the overlay glued and saves it
+    if (typeof ResizeObserver !== 'undefined') {
+      boxObserver = new ResizeObserver(() => { positionOverlay(); scheduleSave(); });
+      boxObserver.observe(activeBox);
+    }
   }
 
   function positionOverlay() {
@@ -880,17 +925,22 @@
       const flowOpts = Object.assign({}, o, { marginTop: o.marginTop + wsTop });
       const pages = NTLayout.flow(FONT, doc, flowOpts);
 
-      // embed every distinct image once
+      // embed every distinct image once — standalone and inside text boxes
       const imgCache = new Map();
+      const srcs = new Set();
       for (const pg of pages) for (const it of pg) {
-        if (it.kind !== 'image' || imgCache.has(it.src)) continue;
+        if (it.kind === 'image') srcs.add(it.src);
+        else if (it.kind === 'textbox')
+          for (const c of it.content) if (c.type === 'image') srcs.add(c.src);
+      }
+      for (const src of srcs) {
         try {
-          const b64 = String(it.src).split(',')[1];
+          const b64 = String(src).split(',')[1];
           const bin = atob(b64); const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const isPng = String(it.src).slice(0, 20).toLowerCase().indexOf('image/png') > 0;
-          imgCache.set(it.src, isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes));
-        } catch (err) { console.warn('image skipped:', err.message); imgCache.set(it.src, null); }
+          const isPng = String(src).slice(0, 20).toLowerCase().indexOf('image/png') > 0;
+          imgCache.set(src, isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes));
+        } catch (err) { console.warn('image skipped:', err.message); imgCache.set(src, null); }
       }
 
       pages.forEach((lines, pi) => {
@@ -910,11 +960,19 @@
               P.moveTo(bx, byBot), P.lineTo(bx + item.w, byBot),
               P.lineTo(bx + item.w, byTop), P.lineTo(bx, byTop),
               P.closePath(), P.stroke(), P.popGraphicsState());
-            for (const ln of item.lines) {
-              drawLineItems(P, page, font, KEY, ln, bx + item.pad, byTop - item.pad - ln.dy, tracing);
-              if (ln.listMark)
-                drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
-                        bx + item.pad + ln.indent, byTop - item.pad - ln.dy, tracing);
+            for (const c of item.content) {
+              if (c.type === 'image') {
+                const im = imgCache.get(c.src);
+                if (im) page.drawImage(im, { x: bx + item.pad + c.x,
+                        y: byTop - item.pad - c.dy - c.h, width: c.w, height: c.h });
+                continue;
+              }
+              for (const ln of c.lines) {
+                drawLineItems(P, page, font, KEY, ln, bx + item.pad, byTop - item.pad - ln.dy, tracing);
+                if (ln.listMark)
+                  drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
+                          bx + item.pad + ln.indent, byTop - item.pad - ln.dy, tracing);
+              }
             }
             continue;
           }

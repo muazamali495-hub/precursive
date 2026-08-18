@@ -226,20 +226,32 @@
         const pad = 6;
         const w = Math.min(colW, block.w || colW);
         const inner = Math.max(20, w - pad * 2);
-        let lines = [], ch = 0;
-        for (const para of flattenNested(block.paras, opts.baseSize)) {
-          const ls = layoutParagraph(font, para, inner, opts);
-          for (let i = 0; i < ls.length; i++) {
-            positionLine(ls[i], inner, para.align || 'left', i === ls.length - 1);
-            ls[i].dy = ch + ls[i].ascent;
-            ch += ls[i].height;
+        const content = [];   // { type:'lines', lines } | { type:'image', src, x, dy, w, h }
+        let ch = 0;
+        for (const sub of (block.paras || [])) {
+          if (sub && sub.type === 'image') {
+            const natW = (sub.w || 200) * 0.75, natH = (sub.h || 150) * 0.75;
+            const iw = Math.min(inner, natW), ih = natH * (iw / (natW || 1));
+            content.push({ type: 'image', src: sub.src, x: 0, dy: ch, w: iw, h: ih });
+            ch += ih + 4;
+          } else {
+            // paragraphs, and any nested table/box flattened to text
+            const paras = sub && sub.type ? flattenNested([sub], opts.baseSize) : [sub];
+            for (const para of paras) {
+              const ls = layoutParagraph(font, para, inner, opts);
+              for (let i = 0; i < ls.length; i++) {
+                positionLine(ls[i], inner, (para && para.align) || 'left', i === ls.length - 1);
+                ls[i].dy = ch + ls[i].ascent;
+                ch += ls[i].height;
+              }
+              content.push({ type: 'lines', lines: ls });
+            }
           }
-          lines = lines.concat(ls);
         }
-        // honour the dragged size, but never clip the text it holds
+        // honour the dragged size, but never clip the content it holds
         const h = Math.max(block.h || 0, ch + pad * 2);
         if (y + h > usableH && page.length) newPage();
-        page.push({ kind: 'textbox', x: 0, w: w, h: h, pad: pad, lines: lines, y: y });
+        page.push({ kind: 'textbox', x: 0, w: w, h: h, pad: pad, content: content, y: y });
         y += h + 6;
         continue;
       }

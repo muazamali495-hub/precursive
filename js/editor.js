@@ -55,6 +55,19 @@
     return !!m && parseFloat(m[1]) === 0;
   }
 
+  function imageBlockFrom(node) {
+    if (!node) return null;
+    const img = node.tagName === 'IMG' ? node : node.querySelector && node.querySelector('img');
+    if (!img) return null;
+    const wrap = (img.closest && img.closest('.img-wrap')) || null;
+    const m = wrap || img;
+    const w = (m.offsetWidth || parseFloat((wrap && wrap.style.width) || img.style.width) ||
+               img.naturalWidth || 300);
+    const h = (m.offsetHeight || parseFloat((wrap && wrap.style.height) || img.style.height) ||
+               img.naturalHeight || 200);
+    return { type: 'image', src: img.getAttribute('src'), w: w, h: h };
+  }
+
   function alignOf(el) {
     const a = (el.style && el.style.textAlign) || el.getAttribute?.('align') || '';
     return ['center', 'right', 'justify'].includes(a) ? a : 'left';
@@ -120,9 +133,8 @@
       // a <br> splits into separate paragraphs
       let bucket = [];
       const emit = () => {
-        const img = el.querySelector && el.querySelector(':scope > img');
-        if (img) { doc.push({ type:'image', src: img.getAttribute('src'),
-                              w: img.naturalWidth || 0, h: img.naturalHeight || 0 }); bucket = []; return; }
+        const imgHost = el.querySelector && el.querySelector(':scope > img, :scope > .img-wrap');
+        if (imgHost) { const ib = imageBlockFrom(imgHost); if (ib) doc.push(ib); bucket = []; return; }
         doc.push({ align: alignOf(el), list: list || null, level: level || 0,
                    shade: (el.style && el.style.backgroundColor && !isTransparent(el.style.backgroundColor))
                           ? el.style.backgroundColor : null,
@@ -166,8 +178,9 @@
         else if (tag === 'UL') descend(child, 'ul', (level || 0) + (list ? 1 : 0));
         else if (tag === 'OL') descend(child, 'ol', (level || 0) + (list ? 1 : 0));
         else if (tag === 'LI') pushPara(child, list, level);
-        else if (tag === 'IMG') doc.push({ type:'image', src: child.getAttribute('src'),
-                                           w: child.naturalWidth || 0, h: child.naturalHeight || 0 });
+        else if (tag === 'IMG' || (child.classList && child.classList.contains('img-wrap'))) {
+          const ib = imageBlockFrom(child); if (ib) doc.push(ib);
+        }
         else if (BLOCK.test(tag) && child.classList && child.classList.contains('textbox')) {
           const px = v => (parseFloat(v) || 0) * 0.75;      // CSS px -> points
           doc.push({ type: 'textbox',
@@ -175,8 +188,11 @@
                      paras: parseDocument(child, baseSize) });
         }
         else if (BLOCK.test(tag)) {
-          // a block may itself contain a table (execCommand wraps things)
-          if (child.querySelector(':scope > table, :scope > .textbox, :scope > img, :scope > hr')) descend(child, list, level);
+          // execCommand wraps inserted things inside the current block
+          if (child.querySelector(':scope > table, :scope > .textbox, :scope > hr')) descend(child, list, level);
+          else if (child.querySelector(':scope > img, :scope > .img-wrap')) {
+            const ib = imageBlockFrom(child); if (ib) doc.push(ib);
+          }
           else pushPara(child, null, 0);
         }
       }
