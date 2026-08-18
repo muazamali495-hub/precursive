@@ -523,65 +523,35 @@
 
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount) return;
-    let range = sel.getRangeAt(0);
-    // may be the body, the header or the footer
+    const range = sel.getRangeAt(0);
     const region = regionOf(range.commonAncestorContainer);
     if (!region) return;
 
+    /* Apply through execCommand('insertHTML') rather than by hand. Direct DOM
+       surgery worked, but the browser does not record it, so Ctrl+Z could not
+       undo a size change. insertHTML replaces exactly the selection and lands
+       on the undo stack. Note this is NOT execCommand('fontSize'), which is
+       the call that caused the earlier sizing bugs. */
     if (range.collapsed) {
-      const span = document.createElement('span');
-      span.style.fontSize = px + 'px';
-      span.appendChild(document.createTextNode(ZWSP));
-      range.insertNode(span);
-      const r = document.createRange();
-      r.setStart(span.firstChild, 1);
-      r.collapse(true);
-      sel.removeAllRanges(); sel.addRange(r);
-      refresh(); scheduleSave();
-      return;
-    }
-
-    // split the partially-selected boundary nodes so we never touch
-    // characters outside the selection
-    let { startContainer: sc, startOffset: so, endContainer: ec, endOffset: eo } = range;
-    if (ec.nodeType === 3 && eo > 0 && eo < ec.nodeValue.length) {
-      ec.splitText(eo);
-      if (sc === ec && so > eo) { sc = ec; }
-    }
-    if (sc.nodeType === 3 && so > 0 && so < sc.nodeValue.length) {
-      const after = sc.splitText(so);
-      if (ec === sc) ec = after;
-      sc = after; so = 0;
-    }
-    range = document.createRange();
-    range.setStart(sc, sc.nodeType === 3 ? 0 : so);
-    range.setEnd(ec, ec.nodeType === 3 ? ec.nodeValue.length : eo);
-
-    const targets = [];
-    const walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT, null);
-    let n;
-    while ((n = walker.nextNode())) {
-      if (!n.nodeValue.length) continue;
-      if (range.intersectsNode(n)) targets.push(n);
-    }
-    if (!targets.length) return;
-
-    let first = null, last = null;
-    for (const t of targets) {
-      if (!t.parentNode) continue;
-      const span = document.createElement('span');
-      span.style.fontSize = px + 'px';
-      t.parentNode.insertBefore(span, t);
-      span.appendChild(t);
-      // an ancestor size is overridden by this span; a *descendant* size would
-      // beat it, but a text node has none, so nothing further is needed here
-      first = first || span; last = span;
-    }
-    // strip now-redundant sizes on ancestors that only wrapped this run
-    const r2 = document.createRange();
-    if (first && last) {
-      r2.setStartBefore(first); r2.setEndAfter(last);
-      sel.removeAllRanges(); sel.addRange(r2);
+      document.execCommand('insertHTML', false,
+        '<span style="font-size:' + px + 'px" data-pc-caret="1">' + ZWSP + '</span>');
+      // put the caret inside the new span so what is typed next takes the size
+      const marker = region.querySelector('[data-pc-caret]');
+      if (marker) {
+        marker.removeAttribute('data-pc-caret');
+        const r = document.createRange();
+        r.setStart(marker.firstChild || marker, (marker.firstChild || marker).length || 0);
+        r.collapse(true);
+        sel.removeAllRanges(); sel.addRange(r);
+      }
+    } else {
+      const tmp = document.createElement('div');
+      tmp.appendChild(range.cloneContents());
+      // a nested size would beat the one being applied
+      tmp.querySelectorAll('[style*="font-size"]').forEach(n => n.style.fontSize = '');
+      tmp.querySelectorAll('font[size]').forEach(n => n.removeAttribute('size'));
+      document.execCommand('insertHTML', false,
+        '<span style="font-size:' + px + 'px">' + tmp.innerHTML + '</span>');
     }
     refresh(); scheduleSave();
   }
