@@ -244,21 +244,12 @@
     /* --- Insert: symbols (only what this font can actually draw) --- */
     popToggle(el.symbolBtn, el.symbolMenu, buildSymbolGrid);
 
-    el.tableBtn.addEventListener('click', () => el.tableMenu.hidden = !el.tableMenu.hidden);
+    popToggle(el.tableBtn, el.tableMenu);
     el.tableInsert.addEventListener('click', () => {
-      insertTable(Math.max(1, Math.min(12, +el.tableRows.value || 2)),
+      insertTable(Math.max(1, Math.min(20, +el.tableRows.value || 2)),
                   Math.max(1, Math.min(8,  +el.tableCols.value || 2)),
                   el.tableHeader.checked);
-      el.tableMenu.hidden = true;
-    });
-    document.addEventListener('click', e => {
-      if (!el.tableMenu.hidden && !el.tableMenu.contains(e.target) && e.target !== el.tableBtn)
-        el.tableMenu.hidden = true;
-    });
-    el.pageBreakBtn.addEventListener('click', () => {
-      el.editor.focus();
-      document.execCommand('insertHTML', false, '<hr class="pgbreak"><div><br></div>');
-      refresh(); scheduleSave();
+      closeMenus();
     });
   }
 
@@ -271,18 +262,41 @@
     refresh(); scheduleSave();
   }
 
+  function closeMenus() {
+    document.querySelectorAll('.popmenu').forEach(m => m.hidden = true);
+  }
+
+  /* Menus are position:fixed, so place them from the button's viewport rect
+     and clamp so they never hang off the edge of the window. */
+  function placeMenu(btn, menu) {
+    menu.hidden = false;
+    menu.style.visibility = 'hidden';
+    const b = btn.getBoundingClientRect();
+    const m = menu.getBoundingClientRect();
+    let left = b.left;
+    let top = b.bottom + 3;
+    if (left + m.width > innerWidth - 8) left = Math.max(8, innerWidth - m.width - 8);
+    if (top + m.height > innerHeight - 8) top = Math.max(8, b.top - m.height - 3);
+    menu.style.left = Math.round(left) + 'px';
+    menu.style.top = Math.round(top) + 'px';
+    menu.style.visibility = '';
+  }
+
   function popToggle(btn, menu, onOpen) {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const opening = menu.hidden;
-      document.querySelectorAll('.popmenu').forEach(m => m.hidden = true);
-      menu.hidden = !opening;
-      if (opening && onOpen) onOpen();
+      closeMenus();
+      if (!opening) return;
+      if (onOpen) onOpen();
+      placeMenu(btn, menu);
     });
     menu.addEventListener('click', e => e.stopPropagation());
   }
-  document.addEventListener('click', () =>
-    document.querySelectorAll('.popmenu').forEach(m => m.hidden = true));
+  document.addEventListener('click', closeMenus);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+  window.addEventListener('resize', closeMenus);
+  document.querySelector('.stage')?.addEventListener('scroll', closeMenus);
 
   function switchTab(name) {
     const t = document.querySelector('.rb-tab[data-tab="' + name + '"]');

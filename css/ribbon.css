@@ -76,9 +76,15 @@ button { font:inherit; cursor:pointer; }
 .rb-chk { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--ink); white-space:nowrap; }
 .rb-chk input { accent-color:var(--word-blue); }
 
-.popmenu { position:absolute; z-index:60; margin-top:2px; min-width:190px; background:var(--surface);
-  border:1px solid var(--ribbon-line); border-radius:4px; box-shadow:0 6px 20px rgba(0,0,0,.22);
+/* Fixed, not absolute: the ribbon panel scrolls horizontally, which creates a
+   clipping context that would cut an absolutely-positioned menu off. Position
+   is set in JS from the button's rect. The [hidden] rule must be more specific
+   than .popmenu or the display:flex below silently defeats the hidden
+   attribute and every menu stays permanently on screen. */
+.popmenu { position:fixed; z-index:200; min-width:190px; background:var(--surface);
+  border:1px solid var(--ribbon-line); border-radius:4px; box-shadow:0 6px 20px rgba(0,0,0,.28);
   padding:8px; display:flex; flex-direction:column; gap:7px; }
+.popmenu[hidden] { display:none; }
 .popmenu.sm { min-width:152px; gap:1px; padding:5px; }
 .popmenu.sm button { text-align:left; padding:6px 9px; border:0; border-radius:3px;
   background:transparent; color:var(--ink); font-size:12.5px; }
