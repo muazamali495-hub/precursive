@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-Cursive — turn your text into handwriting</title>
+<meta name="description" content="Paste any text and download it as a PDF set in the NTPreCursive handwriting font. Runs entirely in your browser — your text is never uploaded.">
+<meta name="theme-color" content="#3b7ea1">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap topbar">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">✍</span>
+      <span>
+        <strong>Pre-Cursive</strong>
+        <small>text → handwriting PDF</small>
+      </span>
+    </div>
+    <button id="themeBtn" class="ghost" type="button" aria-label="Toggle dark mode">◐</button>
+  </div>
+</header>
+
+<main class="wrap grid">
+
+  <!-- ---------- input ---------- -->
+  <section class="card pane">
+    <div class="pane-head">
+      <h2>Your text</h2>
+      <div class="pane-actions">
+        <button id="sample" class="ghost sm" type="button">Sample</button>
+        <button id="clear"  class="ghost sm" type="button">Clear</button>
+      </div>
+    </div>
+
+    <textarea id="input" spellcheck="false"
+      placeholder="Type or paste your text here…"></textarea>
+
+    <div id="notice" class="notice" hidden>
+      <div class="notice-head">
+        <span class="dot"></span>
+        <span id="noticeText"></span>
+      </div>
+      <div id="noticeDetails" class="chips"></div>
+    </div>
+
+    <div class="controls">
+      <label class="ctl">
+        <span>Size <b id="sizeVal">18pt</b></span>
+        <input id="size" type="range" min="10" max="40" step="1" value="18">
+      </label>
+
+      <label class="ctl narrow">
+        <span>Page</span>
+        <select id="pageSize">
+          <option value="a4" selected>A4</option>
+          <option value="letter">Letter</option>
+        </select>
+      </label>
+
+      <label class="ctl check">
+        <input id="rules" type="checkbox">
+        <span>Guide lines</span>
+      </label>
+    </div>
+
+    <button id="convert" class="primary" type="button">
+      <span class="label">Convert to NT Pre-Cursive</span>
+      <span class="spin" aria-hidden="true"></span>
+    </button>
+
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </section>
+
+  <!-- ---------- preview ---------- -->
+  <section class="card pane">
+    <div class="pane-head">
+      <h2>Preview</h2>
+      <span id="stats" class="stats">A4 · ready</span>
+    </div>
+    <div id="preview" class="preview">
+      <div id="sheet" class="sheet"><span class="placeholder">Your handwriting will appear here…</span></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap foot">
+  <p>Everything runs in your browser — your text is never uploaded or stored.</p>
+  <p class="fine">Pre-Cursive typeface © 2003 Thomas Nelson &amp; Sons Ltd. · <span id="year"></span></p>
+</footer>
+
+<script src="vendor/pdf-lib.min.js"></script>
+<script src="vendor/fontkit.umd.min.js"></script>
+<script src="js/font-data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/app.js"></script>
+<script>
+  // theme toggle (remembers choice)
+  (function () {
+    const b = document.getElementById('themeBtn');
+    const saved = localStorage.getItem('pc-theme');
+    if (saved) document.documentElement.dataset.theme = saved;
+    b.addEventListener('click', function () {
+      const cur = document.documentElement.dataset.theme
+        || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.dataset.theme = next;
+      localStorage.setItem('pc-theme', next);
+    });
+  })();
+</script>
+</body>
+</html>
