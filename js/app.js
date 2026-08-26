@@ -153,6 +153,11 @@
 
   let FONT = null, fontBytes = null, saveTimer = null;
 
+  /* The size the ribbon shows when the caret is in ordinary text. Text with
+     no size of its own inherits it, so changing it moves the whole document
+     - including anything inside a text box or a table cell. */
+  let baseSize = NTEditor.DEFAULT_SIZE;
+
   /* ---------- boot ---------- */
   function b64ToBytes(b64) {
     const bin = atob(b64), out = new Uint8Array(bin.length);
@@ -180,6 +185,12 @@
     el.editor.addEventListener('input', () => { refresh(); scheduleSave(); });
     el.editor.addEventListener('keyup', syncToolbarState);
     el.editor.addEventListener('mouseup', syncToolbarState);
+    el.editor.addEventListener('keyup', syncSizeBox);
+    el.editor.addEventListener('mouseup', syncSizeBox);
+    [el.pageHeader, el.pageFooter].forEach(function (rg) {
+      rg.addEventListener('keyup', syncSizeBox);
+      rg.addEventListener('mouseup', syncSizeBox);
+    });
     // paste as plain text so foreign fonts and colours never leak in
     el.editor.addEventListener('paste', e => {
       e.preventDefault();
@@ -409,14 +420,14 @@
 
     /* --- Insert: text --- */
     el.textBoxBtn.addEventListener('click', () => {
-      insertHTML('<div class="textbox" style="width:340px;height:120px"><div>' +
+      insertBlockHTML('<div class="textbox" style="width:340px;height:120px"><div>' +
         '[Grab your reader&rsquo;s attention with a great quote, or use this space ' +
-        'to emphasise a key point.]</div></div><div><br></div>');
+        'to emphasise a key point.]</div></div><div><br></div>', 'div');
       const boxes = el.editor.querySelectorAll('.textbox');
       selectTextBox(boxes[boxes.length - 1]);
     });
     el.wordArtBtn.addEventListener('click', () =>
-      insertHTML('<div class="wordart">WordArt</div><div><br></div>'));
+      insertBlockHTML('<div class="wordart">WordArt</div><div><br></div>'));
     el.dropCapBtn.addEventListener('click', () => applyToBlock(b => b.classList.toggle('dropcap')));
     el.dateBtn.addEventListener('click', () => {
       const d = new Date();
@@ -480,6 +491,38 @@
     const r = document.createRange();
     r.selectNodeContents(target); r.collapse(false);
     sel.removeAllRanges(); sel.addRange(r);
+  }
+
+  /* Block content - a text box, WordArt - has to be placed directly.
+     execCommand('insertHTML') unwraps a block element when the caret sits
+     inside an inline one, which quietly turned an inserted text box into
+     loose text. This puts it in the gap after the block holding the caret and
+     leaves the caret inside it, ready to type. */
+  function insertBlockHTML(html, caretSelector) {
+    focusEditor();
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return null;
+    const region = regionOf(sel.getRangeAt(0).commonAncestorContainer) || el.editor;
+
+    let block = sel.getRangeAt(0).startContainer;
+    if (block.nodeType !== 1) block = block.parentNode;
+    while (block && block.parentNode && block.parentNode !== region) block = block.parentNode;
+
+    const frag = document.createRange().createContextualFragment(html);
+    const first = frag.firstElementChild;
+    if (block && block.parentNode === region) region.insertBefore(frag, block.nextSibling);
+    else region.appendChild(frag);
+
+    const landing = first && caretSelector
+      ? (first.matches(caretSelector) ? first : first.querySelector(caretSelector))
+      : first;
+    if (landing) {
+      const r = document.createRange();
+      r.selectNodeContents(landing); r.collapse(false);
+      sel.removeAllRanges(); sel.addRange(r);
+    }
+    refresh(); scheduleSave();
+    return first;
   }
 
   function insertHTML(html) {
@@ -794,18 +837,37 @@
   }
 
   /* ---------- font size ----------
-   * execCommand('fontSize') is unusable here. It only understands the legacy
-   * 1-7 scale, what it emits depends on styleWithCSS, and with a collapsed
-   * caret it reaches for the nearest inline ancestor — which is how changing
-   * the size for a new paragraph could silently restyle the previous one.
+   * The size the ribbon shows is the size the next character will have.
    *
-   * Instead we work on the Range directly: split the boundary text nodes so
-   * only the selected characters are affected, wrap each selected text node in
-   * its own span, and clear any font-size inside that span so the new value
-   * wins. With a collapsed caret we insert an empty styled span and park the
-   * caret in it, so the size applies to what is typed next and to nothing else.
+   * With nothing selected the number is the document base size: a CSS
+   * variable on the page drives the screen, and parseDocument and the PDF
+   * layout read the same number, so text that carries no size of its own
+   * looks the same everywhere - body, text box, table cell.
+   *
+   * With text selected the number becomes a local override on just that
+   * text, written through execCommand so Ctrl+Z can undo it. This is not
+   * execCommand("fontSize"), which only understands the legacy 1-7 scale and
+   * caused the earlier sizing bugs.
    */
-  const ZWSP = '​';
+  /* Set the size everything unstyled inherits. One CSS variable drives the
+     screen; parseDocument and the PDF layout read the same number. */
+  function setBaseSize(px, o) {
+    baseSize = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0) || NTEditor.DEFAULT_SIZE));
+    el.editor.style.setProperty('--base-size', baseSize + 'px');
+    el.sizeInput.value = baseSize;
+    if (o && o.quiet) return;
+    refresh(); scheduleSave();
+  }
+
+  /* Show the size the next character will really have: the override the
+     caret sits in, or the base size when there is none. Left alone while the
+     box itself has focus, so it never fights what is being typed into it. */
+  function syncSizeBox() {
+    if (document.activeElement === el.sizeInput) return;
+    const st = capturedStyle();
+    const n = st && st.size;
+    el.sizeInput.value = (n && n >= MIN_SIZE && n <= MAX_SIZE) ? n : baseSize;
+  }
 
   function applySize(px) {
     px = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0)));
@@ -813,29 +875,26 @@
     focusEditor();
 
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    const region = regionOf(range.commonAncestorContainer);
-    if (!region) return;
+    const live = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    const region = live ? regionOf(live.commonAncestorContainer) : null;
+
+    /* The header and footer are sized by their own controls, so a size set
+       while working in one of them belongs to that region. */
+    if (region === el.pageHeader) { el.headerSize.value = px; refresh(); scheduleSave(); return; }
+    if (region === el.pageFooter) { el.footerSize.value = px; refresh(); scheduleSave(); return; }
+
+    /* Nothing selected: this is a choice about the document, not about a few
+       characters, so make it the base size and let it hold everywhere. */
+    if (!live || live.collapsed || !region) { setBaseSize(px); return; }
+
+    const range = live;
 
     /* Apply through execCommand('insertHTML') rather than by hand. Direct DOM
        surgery worked, but the browser does not record it, so Ctrl+Z could not
        undo a size change. insertHTML replaces exactly the selection and lands
        on the undo stack. Note this is NOT execCommand('fontSize'), which is
        the call that caused the earlier sizing bugs. */
-    if (range.collapsed) {
-      document.execCommand('insertHTML', false,
-        '<span style="font-size:' + px + 'px" data-pc-caret="1">' + ZWSP + '</span>');
-      // put the caret inside the new span so what is typed next takes the size
-      const marker = region.querySelector('[data-pc-caret]');
-      if (marker) {
-        marker.removeAttribute('data-pc-caret');
-        const r = document.createRange();
-        r.setStart(marker.firstChild || marker, (marker.firstChild || marker).length || 0);
-        r.collapse(true);
-        sel.removeAllRanges(); sel.addRange(r);
-      }
-    } else {
+    {
       const tmp = document.createElement('div');
       tmp.appendChild(range.cloneContents());
       // a nested size would beat the one being applied
@@ -894,7 +953,7 @@
     return {
       pageW: land ? ps.h : ps.w, pageH: land ? ps.w : ps.h,
       marginL: m, marginR: m, marginTop: m, marginBottom: m,
-      baseSize: NTEditor.DEFAULT_SIZE,
+      baseSize: baseSize,
       lineSpacing: +el.spacing.value,
       indentPt: 26, paraSpacing: 0,
       label: ps.label + (land ? ' landscape' : '')
@@ -902,7 +961,7 @@
   }
 
   function currentDoc() {
-    const doc = NTEditor.parseDocument(el.editor, NTEditor.DEFAULT_SIZE);
+    const doc = NTEditor.parseDocument(el.editor, baseSize);
     return NTEditor.foldDocument(FONT, doc, NTEngine.fold);
   }
 
@@ -985,7 +1044,7 @@
 
   function snapshot(html) {
     return {
-      html: html,
+      html: html, baseSize: baseSize,
       headerHTML: el.pageHeader.innerHTML, footerHTML: el.pageFooter.innerHTML,
       page: el.pageSize.value, orient: el.orientation.value,
       rules: el.rules.checked, tracing: el.tracing.checked,
@@ -1051,6 +1110,7 @@
       if (s.headerText !== undefined) el.headerText.value = s.headerText || '';
       if (s.footerText !== undefined) el.footerText.value = s.footerText || '';
     }
+    if (s.baseSize) setBaseSize(s.baseSize, { quiet: true });
     if (s.page) el.pageSize.value = s.page;
     if (s.orient) el.orientation.value = s.orient;
     el.rules.checked = !!s.rules; el.tracing.checked = !!s.tracing;

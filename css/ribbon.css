@@ -110,7 +110,7 @@ button { font:inherit; cursor:pointer; }
 .editor.page { width:100%; max-width:794px; min-height:1000px; margin:0 auto;
   background:var(--paper); color:#1b2129; border:1px solid var(--paper-edge);
   box-shadow:0 2px 14px rgba(0,0,0,.36); padding:76px 72px;
-  font-family:"NTPreCursive", Georgia, serif; font-size:18px;
+  font-family:"NTPreCursive", Georgia, serif; font-size:var(--base-size, 18px);
   line-height:calc(1.158 * var(--ls,1)); outline:none; }
 .editor ul, .editor ol { padding-left:1.5em; margin:0; }
 .editor div { min-height:1em; }
