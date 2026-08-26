@@ -111,6 +111,9 @@
           if (st.color) s.color = st.color;
           if (st.backgroundColor && !isTransparent(st.backgroundColor)) s.hl = st.backgroundColor;
           if ((st.textDecorationLine || st.textDecoration || '').includes('line-through')) s.strike = true;
+          const va = (st.verticalAlign || '').toLowerCase();
+          if (va === 'sub') s.sub = true;
+          else if (va === 'super') s.sup = true;
           if (st.fontSize && st.fontSize.endsWith('px')) s.size = parseFloat(st.fontSize);
         }
         if (tag === 'H1') s.size = baseSize * 1.9, s.b = true;
