@@ -209,6 +209,22 @@
      correctly decoded text never contains raw control characters, and real
      prose is roughly a third vowels. A Caesar-shifted decode looks like
      letters, so a letter-ratio test alone never catches it. */
+  /* How word-like is this text? Counts sequences that look like English words
+     and common short words, so a re-read can be compared against the original
+     rather than merely assumed to be an improvement. */
+  const COMMON = new Set(("the of and to in is it for on as at by an be or are with that this " +
+    "from was not have has had you your all can will each which their said if do how" ).split(" "));
+  function englishScore(text) {
+    const words = String(text || "").toLowerCase().match(/[a-z]{1,20}/g) || [];
+    if (!words.length) return 0;
+    let hits = 0, vowelly = 0;
+    for (const w of words) {
+      if (COMMON.has(w)) hits += 3;
+      if (/[aeiou]/.test(w)) vowelly++;
+    }
+    return (hits + vowelly) / words.length;
+  }
+
   function looksGarbled(text) {
     const s = String(text || "").slice(0, 4000);
     if (s.length < 12) return false;
@@ -353,7 +369,7 @@
          the lines, and it also fixes reading order. */
       const items = [];                       // { x, y, text }
       let tm = [1,0,0,1,0,0], tlm = [1,0,0,1,0,0], leading = 0;
-      let activeMap = null, twoByte = false, fontSize = 12, activeFont = null;
+      let activeMap = null, twoByte = false, fontSize = 12, activeFont = null, activeName = null;
       const setTm = n => { tm = n.slice(); tlm = n.slice(); };
       const translate = (tx, ty) => {
         // tlm = [1 0 0 1 tx ty] x tlm
@@ -364,7 +380,8 @@
       };
       const emit = txt => {
         if (!txt) return;
-        items.push({ x: tm[4], y: tm[5], text: txt, size: Math.abs(tm[3] || 1) * fontSize });
+        items.push({ x: tm[4], y: tm[5], text: txt, size: Math.abs(tm[3] || 1) * fontSize,
+                     font: activeName, mapped: !!activeMap });
       };
 
       const tokens = content.match(new RegExp("\\/[A-Za-z0-9#+\\-.]+|\\[[^\\]]*\\]|\\([^\\\\)]*(?:\\\\.[^\\\\)]*)*\\)|<[0-9A-Fa-f\\s]*>|-?[\\d.]+|[A-Za-z'\"*]+", 'g')) || [];
@@ -379,6 +396,7 @@
             if (!isNaN(sz)) fontSize = sz;
             if (nm) {
               const k = nm.slice(1);
+              activeName = k;
               activeFont = fontInfo.get(k) || null;
               activeMap = activeFont ? activeFont.map : null;
               // byte width follows the font type, never the presence of a map
@@ -418,6 +436,36 @@
       }
       if (!items.length) continue;
 
+      /* Repair per font, never per page. A file can mix fonts that decode
+         correctly with a subset font whose codes are glyph indices; judging
+         the page as a whole would re-map the good text too. */
+      (function repairByFont() {
+        const byFont = new Map();
+        for (const it of items) {
+          const k = it.font || '';
+          if (!byFont.has(k)) byFont.set(k, []);
+          byFont.get(k).push(it);
+        }
+        const mo = macOrderMap();
+        byFont.forEach(function (group) {
+          // a font that supplied a real encoding is trusted as-is
+          if (group[0] && group[0].mapped) return;
+          const before = group.map(g => g.text).join(' ');
+          if (!looksGarbled(before)) return;
+          const after = group.map(function (g) {
+            return g.text.split('').map(function (ch) {
+              const c = mo.get(ch.charCodeAt(0));
+              return c === undefined ? ch : c;
+            }).join('');
+          });
+          // only keep the re-read when it is genuinely better
+          if (looksGarbled(after.join(' '))) return;
+          if (englishScore(after.join(' ')) <= englishScore(before)) return;
+          group.forEach(function (g, i) { g.text = after[i]; });
+        });
+      })();
+
+
       /* Group into lines by y (tolerance scaled to the text size), then order
          top-to-bottom and left-to-right, inserting a space where two pieces on
          the same line were positioned apart. */
@@ -428,7 +476,7 @@
         if (row) { row.parts.push(it); row.y = (row.y + it.y) / 2; }
         else rows.push({ y: it.y, parts: [it] });
       }
-      let lines = rows.map(r => {
+      const lines = rows.map(r => {
         r.parts.sort((p, q) => p.x - q.x);
         let out = '';
         let prev = null;
@@ -443,19 +491,6 @@
         // If a font gave us no encoding at all, raw bytes may really be glyph
         // indices. Retry through the standard Macintosh ordering and keep
         // whichever reading actually looks like words.
-        /* If the reading looks wrong, the byte codes may really be glyph
-           indices. Re-read through the standard Macintosh ordering and keep
-           that version only if it is genuinely better. */
-        if (looksGarbled(lines.join(" "))) {
-          const mo = macOrderMap();
-          const retry = lines.map(function (l) {
-            return l.split("").map(function (ch) {
-              const c = mo.get(ch.charCodeAt(0));
-              return c === undefined ? ch : c;
-            }).join("");
-          });
-          if (!looksGarbled(retry.join(" "))) lines = retry;
-        }
         pagesOut.push(lines);
       }
     }
