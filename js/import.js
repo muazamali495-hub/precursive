@@ -360,6 +360,8 @@
   async function buildFontDecoder(ctx, PDFName, fontRef) {
     const info = { twoByte: false, decode: null };
     let toUni = null, diffs = null, baseEnc = null, gidRev = null, symbolic = false;
+    const widths = new Map();
+    let defaultW = null;
     let type0 = false;
 
     try {
@@ -418,14 +420,59 @@
         }
       }
 
-      // 3. symbolic flag decides whether a standard encoding may be assumed
+      // 3. advance widths, so the pen can be moved by the real glyph widths
+      if (type0) {
+        const dwv = holder.get(PDFName.of('DW'));
+        defaultW = dwv && typeof dwv.asNumber === 'function' ? dwv.asNumber() / 1000 : 1;
+        const wRef = holder.get(PDFName.of('W'));
+        const wArr = wRef ? ctx.lookup(wRef) : null;
+        if (wArr && wArr.asArray) {
+          const a = wArr.asArray().map(function (v) { return ctx.lookup(v); });
+          let i = 0;
+          while (i < a.length) {
+            const first = a[i] && typeof a[i].asNumber === 'function' ? a[i].asNumber() : null;
+            if (first === null) break;
+            const nxt = a[i + 1];
+            if (nxt && nxt.asArray) {
+              // [ first [w1 w2 ...] ]
+              nxt.asArray().forEach(function (v, k) {
+                const o = ctx.lookup(v);
+                if (o && typeof o.asNumber === 'function') widths.set(first + k, o.asNumber() / 1000);
+              });
+              i += 2;
+            } else {
+              // [ first last w ]
+              const last = nxt && typeof nxt.asNumber === 'function' ? nxt.asNumber() : first;
+              const wv = a[i + 2] && typeof a[i + 2].asNumber === 'function' ? a[i + 2].asNumber() : 0;
+              const span = Math.min(last, first + 65535);
+              for (let c = first; c <= span; c++) widths.set(c, wv / 1000);
+              i += 3;
+            }
+          }
+        }
+      } else {
+        const fcv = font.get(PDFName.of('FirstChar'));
+        const fc = fcv && typeof fcv.asNumber === 'function' ? fcv.asNumber() : null;
+        const wRef = font.get(PDFName.of('Widths'));
+        const wArr = wRef ? ctx.lookup(wRef) : null;
+        if (fc !== null && wArr && wArr.asArray) {
+          wArr.asArray().forEach(function (v, k) {
+            const o = ctx.lookup(v);
+            if (o && typeof o.asNumber === 'function') widths.set(fc + k, o.asNumber() / 1000);
+          });
+        }
+      }
+
+      // 4. symbolic flag decides whether a standard encoding may be assumed
       const fdRef = holder.get && holder.get(PDFName.of('FontDescriptor'));
       const fd = fdRef ? ctx.lookup(fdRef) : null;
       if (fd && fd.get) {
         const fl = fd.get(PDFName.of('Flags'));
         const flags = fl && typeof fl.asNumber === 'function' ? fl.asNumber() : 0;
         symbolic = !!(flags & 4) && !(flags & 32);
-        // 4. the embedded font program answers glyph-index codes exactly
+        const mw = fd.get(PDFName.of('MissingWidth'));
+        if (defaultW === null && mw && typeof mw.asNumber === 'function') defaultW = mw.asNumber() / 1000;
+        // 5. the embedded font program answers glyph-index codes exactly
         for (const key of ['FontFile2', 'FontFile3', 'FontFile']) {
           const ffRef = fd.get(PDFName.of(key));
           if (!ffRef) continue;
@@ -436,6 +483,14 @@
     } catch (e) { /* fall through with whatever was resolved */ }
 
     const preferGid = type0 || symbolic || (!baseEnc && !diffs);
+
+    /* Advance for one code, in ems. Falls back to a half em only when the
+       file states no width at all, which is rare and never for embedded text. */
+    info.widthOf = function (code) {
+      if (widths.has(code)) return widths.get(code);
+      if (defaultW !== null) return defaultW;
+      return 0.5;
+    };
 
     info.decode = function (code) {
       if (toUni && toUni.has(code)) return toUni.get(code);
@@ -481,6 +536,256 @@
 
   const CONTROLish = /[\u0000-\u0008\u000E-\u001F]/g;
 
+  /* --- geometry helpers ------------------------------------------------ */
+
+  // matrices are [a b c d e f]; this is m1 x m2
+  function mul(m1, m2) {
+    return [
+      m1[0] * m2[0] + m1[1] * m2[2],
+      m1[0] * m2[1] + m1[1] * m2[3],
+      m1[2] * m2[0] + m1[3] * m2[2],
+      m1[2] * m2[1] + m1[3] * m2[3],
+      m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+      m1[4] * m2[1] + m1[5] * m2[3] + m2[5]
+    ];
+  }
+
+  /* Recursive XY-cut. A page is split into horizontal bands wherever there is
+     a clear run of blank vertical space, then each band is split at any clear
+     vertical gutter. That keeps a full-width heading whole while separating
+     two columns or two side-by-side boxes, which would otherwise be stitched
+     into one nonsense line. */
+  function xyCut(items, depth) {
+    if (items.length < 2 || depth > 5) return [items];
+
+    // horizontal bands
+    const sorted = items.slice().sort(function (p, q) { return q.y - p.y; });
+    const lineH = Math.max(6, (sorted[0].size || 12) * 1.6);
+    const bands = [];
+    let cur = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      if (cur[cur.length - 1].y - sorted[i].y > lineH * 1.5) { bands.push(cur); cur = []; }
+      cur.push(sorted[i]);
+    }
+    bands.push(cur);
+    if (bands.length > 1 && depth < 5) {
+      const out = [];
+      bands.forEach(function (bnd) { xyCut(bnd, depth + 1).forEach(function (g) { out.push(g); }); });
+      return out;
+    }
+
+    // vertical gutter inside this band
+    const cut = findGutter(items);
+    if (cut !== null) {
+      const left = [], right = [];
+      items.forEach(function (it) { (it.x + it.w / 2 < cut ? left : right).push(it); });
+      if (left.length && right.length) {
+        const out = [];
+        xyCut(left, depth + 1).forEach(function (g) { out.push(g); });
+        xyCut(right, depth + 1).forEach(function (g) { out.push(g); });
+        return out;
+      }
+    }
+    return [items];
+  }
+
+  function findGutter(items) {
+    if (items.length < 4) return null;
+    let minX = Infinity, maxX = -Infinity;
+    items.forEach(function (i) { minX = Math.min(minX, i.x); maxX = Math.max(maxX, i.x + i.w); });
+    const span = maxX - minX;
+    if (span < 120) return null;
+    const BIN = 3, bins = Math.ceil(span / BIN);
+    const filled = new Uint8Array(bins + 1);
+    items.forEach(function (i) {
+      const s = Math.floor((i.x - minX) / BIN), e = Math.ceil((i.x + i.w - minX) / BIN);
+      for (let k = Math.max(0, s); k <= Math.min(bins, e); k++) filled[k] = 1;
+    });
+    // a gutter must be a wide empty run that is not at either edge
+    const need = Math.max(6, Math.round(24 / BIN));
+    let best = null, run = 0;
+    for (let k = 0; k <= bins; k++) {
+      if (!filled[k]) { run++; continue; }
+      if (run >= need) {
+        const startBin = k - run, endBin = k;
+        const from = minX + startBin * BIN, to = minX + endBin * BIN;
+        if (from > minX + span * 0.15 && to < minX + span * 0.85) {
+          const mid = (from + to) / 2;
+          if (!best || (to - from) > best.width) best = { mid: mid, width: to - from };
+        }
+      }
+      run = 0;
+    }
+    if (run >= need) { /* trailing run touches the edge: not a gutter */ }
+    if (!best) return null;
+    // both sides must actually carry content
+    let l = 0, r = 0;
+    items.forEach(function (i) { (i.x + i.w / 2 < best.mid ? l++ : r++); });
+    const tot = l + r;
+    if (l < tot * 0.15 || r < tot * 0.15) return null;
+    return best.mid;
+  }
+
+  function groupIntoLines(items) {
+    if (!items.length) return [];
+    const tol = Math.max(2, Math.min(6, (items[0].size || 12) * 0.4));
+    const rows = [];
+    items.slice().sort(function (p, q) { return q.y - p.y || p.x - q.x; }).forEach(function (it) {
+      const row = rows.find(function (r) { return Math.abs(r.y - it.y) <= tol; });
+      if (row) { row.parts.push(it); row.y = (row.y + it.y) / 2; }
+      else rows.push({ y: it.y, parts: [it] });
+    });
+    return rows.map(function (r) {
+      r.parts.sort(function (p, q) { return p.x - q.x; });
+      let out = '', prevEnd = null;
+      r.parts.forEach(function (p) {
+        if (prevEnd !== null && !/\s$/.test(out) && p.x - prevEnd > (p.size || 12) * 0.18) out += ' ';
+        out += p.text;
+        prevEnd = p.x + p.w;
+      });
+      return out;
+    }).filter(function (l) { return l.trim(); });
+  }
+
+  /* --- content stream walker -------------------------------------------- */
+
+  async function runContent(env, content, resources, ctm, depth) {
+    const ctx = env.ctx, PDFName = env.PDFName;
+    const decoders = await env.decodersFor(resources);
+
+    let tm = [1, 0, 0, 1, 0, 0], tlm = [1, 0, 0, 1, 0, 0];
+    let leading = 0, fontSize = 12, dec = null, render = 0;
+    let charSp = 0, wordSp = 0, hscale = 1;
+    const gs = [];
+    let cur = ctm.slice();
+
+    const setTm = function (n) { tm = n.slice(); tlm = n.slice(); };
+    const translate = function (tx, ty) {
+      tlm = [tlm[0], tlm[1], tlm[2], tlm[3],
+             tx * tlm[0] + ty * tlm[2] + tlm[4],
+             tx * tlm[1] + ty * tlm[3] + tlm[5]];
+      tm = tlm.slice();
+    };
+    /* Show a string: record it where the pen is, then move the pen by the
+       real advance so the next piece cannot land on top of it. Invisible
+       text still advances - it just is not recorded. */
+    const emit = function (text, adv) {
+      const dev = mul(tm, cur);
+      const scale = Math.sqrt(Math.abs(dev[0] * dev[3] - dev[1] * dev[2])) || 1;
+      const size = fontSize * scale;
+      const spaces = text ? (text.split(' ').length - 1) : 0;
+      const tx = (adv * fontSize + charSp * (text ? text.length : 0) + wordSp * spaces) * hscale;
+      if (text && render !== 3 && render !== 7)
+        env.push({ x: dev[4], y: dev[5], text: text, size: size, w: Math.abs(tx) * scale });
+      tm = mul([1, 0, 0, 1, tx, 0], tm);
+    };
+
+    /* Decode one string token and measure it at the same time. */
+    const readStr = function (tok) {
+      const raw = tok[0] === '(' ? pdfLiteral(tok.slice(1, -1)) : hexToRaw(tok);
+      const codes = codesOf(raw, dec ? dec.twoByte : false);
+      let out = '', adv = 0;
+      for (const c of codes) {
+        out += dec ? dec.decode(c) : String.fromCharCode(c);
+        adv += dec && dec.widthOf ? dec.widthOf(c) : 0.5;
+      }
+      return { text: out, adv: adv };
+    };
+
+    const tokenRe = new RegExp(
+      "\\/[A-Za-z0-9#+\\-.]+|\\[[^\\]]*\\]|\\([^\\\\)]*(?:\\\\.[^\\\\)]*)*\\)|" +
+      "<[0-9A-Fa-f\\s]*>|-?[\\d.]+|[A-Za-z'\"*]+", 'g');
+    const numRe = /^-?[\d.]+$/;
+    const tokens = content.match(tokenRe) || [];
+    let stack = [];
+
+    for (const tk of tokens) {
+      if (tk[0] === '/' || tk[0] === '[' || tk[0] === '(' || tk[0] === '<' || numRe.test(tk)) {
+        stack.push(tk); continue;
+      }
+      switch (tk) {
+        case 'q': gs.push({ ctm: cur.slice(), render: render }); stack = []; break;
+        case 'Q': { const g = gs.pop(); if (g) { cur = g.ctm; render = g.render; } stack = []; break; }
+        case 'cm': { const n = stack.slice(-6).map(Number);
+          if (n.length === 6 && n.every(function (v) { return !isNaN(v); })) cur = mul(n, cur);
+          stack = []; break; }
+        case 'BT': setTm([1, 0, 0, 1, 0, 0]); stack = []; break;
+        case 'Tr': { const v = parseInt(stack[stack.length - 1], 10); if (!isNaN(v)) render = v; stack = []; break; }
+        case 'Tf': {
+          const nm = stack.filter(function (x) { return x[0] === '/'; }).pop();
+          const sz = parseFloat(stack[stack.length - 1]);
+          if (!isNaN(sz)) fontSize = sz;
+          if (nm) dec = decoders.get(nm.slice(1)) || null;
+          stack = []; break;
+        }
+        case 'TL': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) leading = v; stack = []; break; }
+        case 'Tm': { const n = stack.slice(-6).map(Number);
+          if (n.length === 6 && n.every(function (v) { return !isNaN(v); })) setTm(n);
+          stack = []; break; }
+        case 'Td': { const n = stack.slice(-2).map(Number); if (n.length === 2) translate(n[0], n[1]); stack = []; break; }
+        case 'TD': { const n = stack.slice(-2).map(Number); if (n.length === 2) { leading = -n[1]; translate(n[0], n[1]); } stack = []; break; }
+        case 'T*': translate(0, -leading); stack = []; break;
+        case 'Tc': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) charSp = v; stack = []; break; }
+        case 'Tw': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) wordSp = v; stack = []; break; }
+        case 'Tz': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) hscale = v / 100; stack = []; break; }
+        case 'Tj': case "'": case '"': {
+          if (tk !== 'Tj') translate(0, -leading);
+          const s = stack.filter(function (x) { return x[0] === '(' || x[0] === '<'; }).pop();
+          if (s) { const r = readStr(s); emit(r.text, r.adv); }
+          stack = []; break;
+        }
+        case 'TJ': {
+          const arr = stack.filter(function (x) { return x[0] === '['; }).pop() || '';
+          const inner = new RegExp("\\(([^\\\\)]*(?:\\\\.[^\\\\)]*)*)\\)|<([0-9A-Fa-f\\s]*)>|(-?[\\d.]+)", 'g');
+          let piece = '', adv = 0, m;
+          while ((m = inner.exec(arr)) !== null) {
+            if (m[1] !== undefined) { const r = readStr('(' + m[1] + ')'); piece += r.text; adv += r.adv; }
+            else if (m[2] !== undefined) { const r = readStr('<' + m[2] + '>'); piece += r.text; adv += r.adv; }
+            else if (m[3] !== undefined) {
+              const adj = parseFloat(m[3]);
+              if (!isNaN(adj)) {
+                adv -= adj / 1000;
+                // a large backward jump is how most writers encode a space
+                if (adj <= -100 && piece && !/\s$/.test(piece)) piece += ' ';
+              }
+            }
+          }
+          emit(piece, adv);
+          stack = []; break;
+        }
+        case 'Do': {
+          const nm = stack.filter(function (x) { return x[0] === '/'; }).pop();
+          stack = [];
+          if (!nm || depth >= 5) break;
+          try {
+            const xres = resources && resources.lookup ? resources.lookup(PDFName.of('XObject')) : null;
+            const ref = xres && xres.get ? xres.get(PDFName.of(nm.slice(1))) : null;
+            const xo = ref ? ctx.lookup(ref) : null;
+            if (!xo || !xo.getContents) break;
+            const sub = xo.dict && xo.dict.get ? xo.dict.get(PDFName.of('Subtype')) : null;
+            const subName = sub && sub.asString ? sub.asString() : '';
+            if (!/Form/.test(subName)) break;                    // images carry no text
+            const raw = await inflateMaybe(xo.getContents());
+            const body = new TextDecoder('latin1').decode(raw);
+            let mtx = [1, 0, 0, 1, 0, 0];
+            const mref = xo.dict.get(PDFName.of('Matrix'));
+            const marr = mref ? ctx.lookup(mref) : null;
+            if (marr && marr.asArray) {
+              const n = marr.asArray().map(function (v) { const o = ctx.lookup(v); return o && o.asNumber ? o.asNumber() : 0; });
+              if (n.length === 6) mtx = n;
+            }
+            let sub_res = null;
+            const rref = xo.dict.get(PDFName.of('Resources'));
+            if (rref) sub_res = ctx.lookup(rref);
+            await runContent(env, body, sub_res || resources, mul(mtx, cur), depth + 1);
+          } catch (e) { /* a broken XObject must not sink the whole page */ }
+          break;
+        }
+        default: stack = [];
+      }
+    }
+  }
+
   /* --- main ------------------------------------------------------------- */
 
   async function pdfToHtml(bytes) {
@@ -489,11 +794,11 @@
     const PDFName = global.PDFLib.PDFName, PDFArray = global.PDFLib.PDFArray;
     const ctx = doc.context;
     const pagesOut = [];
+    const decoderCache = new Map();
 
     for (const page of doc.getPages()) {
       const node = page.node;
 
-      // resources may be inherited from an ancestor Pages node
       let res = null;
       try { res = node.Resources && node.Resources(); } catch (e) {}
       if (!res) {
@@ -505,22 +810,31 @@
         }
       }
 
-      const decoders = new Map();
-      try {
-        const fonts = res && res.lookup ? res.lookup(PDFName.of('Font')) : null;
-        if (fonts && fonts.entries) {
-          for (const [key, ref] of fonts.entries()) {
-            const name = key.asString().replace(/^\//, '');
-            const dec = await buildFontDecoder(ctx, PDFName, ref);
-            if (dec) decoders.set(name, dec);
-          }
+      const items = [];
+      const env = {
+        ctx: ctx, PDFName: PDFName,
+        push: function (it) { items.push(it); },
+        decodersFor: async function (resources) {
+          if (decoderCache.has(resources)) return decoderCache.get(resources);
+          const map = new Map();
+          try {
+            const fonts = resources && resources.lookup ? resources.lookup(PDFName.of('Font')) : null;
+            if (fonts && fonts.entries) {
+              for (const [key, ref] of fonts.entries()) {
+                const name = key.asString().replace(/^\//, '');
+                const d = await buildFontDecoder(ctx, PDFName, ref);
+                if (d) map.set(name, d);
+              }
+            }
+          } catch (e) {}
+          decoderCache.set(resources, map);
+          return map;
         }
-      } catch (e) {}
+      };
 
-      // content streams
       let content = '';
       try {
-        let c = ctx.lookup(node.get(PDFName.of('Contents')));
+        const c = ctx.lookup(node.get(PDFName.of('Contents')));
         const parts = (c instanceof PDFArray) ? c.asArray().map(function (r) { return ctx.lookup(r); }) : [c];
         for (const st of parts) {
           if (!st || !st.getContents) continue;
@@ -530,108 +844,32 @@
       } catch (e) {}
       if (!content) continue;
 
-      const items = [];
-      let tm = [1, 0, 0, 1, 0, 0], tlm = [1, 0, 0, 1, 0, 0], leading = 0, fontSize = 12;
-      let dec = null;
-      const setTm = function (n) { tm = n.slice(); tlm = n.slice(); };
-      const translate = function (tx, ty) {
-        tlm = [tlm[0], tlm[1], tlm[2], tlm[3],
-               tx * tlm[0] + ty * tlm[2] + tlm[4],
-               tx * tlm[1] + ty * tlm[3] + tlm[5]];
-        tm = tlm.slice();
-      };
-      const emit = function (txt) {
-        if (!txt) return;
-        items.push({ x: tm[4], y: tm[5], text: txt, size: Math.abs(tm[3] || 1) * fontSize });
-      };
-      const readStr = function (tok) {
-        const raw = tok[0] === '(' ? pdfLiteral(tok.slice(1, -1)) : hexToRaw(tok);
-        const twoByte = dec ? dec.twoByte : false;
-        const codes = codesOf(raw, twoByte);
-        let out = '';
-        for (const c of codes) out += dec ? dec.decode(c) : String.fromCharCode(c);
-        return out;
-      };
-
-      const tokenRe = new RegExp(
-        "\\/[A-Za-z0-9#+\\-.]+|\\[[^\\]]*\\]|\\([^\\\\)]*(?:\\\\.[^\\\\)]*)*\\)|" +
-        "<[0-9A-Fa-f\\s]*>|-?[\\d.]+|[A-Za-z'\"*]+", 'g');
-      const numRe = /^-?[\d.]+$/;
-      const tokens = content.match(tokenRe) || [];
-      let stack = [];
-
-      for (const tk of tokens) {
-        if (tk[0] === '/' || tk[0] === '[' || tk[0] === '(' || tk[0] === '<' || numRe.test(tk)) {
-          stack.push(tk); continue;
-        }
-        switch (tk) {
-          case 'BT': setTm([1, 0, 0, 1, 0, 0]); stack = []; break;
-          case 'Tf': {
-            const nm = stack.filter(function (x) { return x[0] === '/'; }).pop();
-            const sz = parseFloat(stack[stack.length - 1]);
-            if (!isNaN(sz)) fontSize = sz;
-            if (nm) dec = decoders.get(nm.slice(1)) || null;
-            stack = []; break;
-          }
-          case 'TL': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) leading = v; stack = []; break; }
-          case 'Tm': { const n = stack.slice(-6).map(Number);
-            if (n.length === 6 && n.every(function (v) { return !isNaN(v); })) setTm(n);
-            stack = []; break; }
-          case 'Td': { const n = stack.slice(-2).map(Number); if (n.length === 2) translate(n[0], n[1]); stack = []; break; }
-          case 'TD': { const n = stack.slice(-2).map(Number); if (n.length === 2) { leading = -n[1]; translate(n[0], n[1]); } stack = []; break; }
-          case 'T*': translate(0, -leading); stack = []; break;
-          case 'Tj': case "'": case '"': {
-            if (tk !== 'Tj') translate(0, -leading);
-            const s = stack.filter(function (x) { return x[0] === '(' || x[0] === '<'; }).pop();
-            if (s) emit(readStr(s));
-            stack = []; break;
-          }
-          case 'TJ': {
-            const arr = stack.filter(function (x) { return x[0] === '['; }).pop() || '';
-            const inner = new RegExp("\\(([^\\\\)]*(?:\\\\.[^\\\\)]*)*)\\)|<([0-9A-Fa-f\\s]*)>|(-?[\\d.]+)", 'g');
-            let piece = '', m;
-            while ((m = inner.exec(arr)) !== null) {
-              if (m[1] !== undefined) piece += readStr('(' + m[1] + ')');
-              else if (m[2] !== undefined) piece += readStr('<' + m[2] + '>');
-              else if (m[3] !== undefined) {
-                const adj = parseFloat(m[3]);
-                if (adj <= -100 && piece && !/\s$/.test(piece)) piece += ' ';
-              }
-            }
-            emit(piece);
-            stack = []; break;
-          }
-          default: stack = [];
-        }
-      }
+      await runContent(env, content, res, [1, 0, 0, 1, 0, 0], 0);
       if (!items.length) continue;
 
-      // group into lines by vertical position, then order the page naturally
-      const tol = Math.max(2, Math.min(6, (items[0].size || 12) * 0.4));
-      const rows = [];
-      items.slice().sort(function (p, q) { return q.y - p.y || p.x - q.x; }).forEach(function (it) {
-        const row = rows.find(function (r) { return Math.abs(r.y - it.y) <= tol; });
-        if (row) { row.parts.push(it); row.y = (row.y + it.y) / 2; }
-        else rows.push({ y: it.y, parts: [it] });
+      /* Drop text drawn twice in the same place. Producers fake bold by
+         stroking the same string a fraction of a point away, and scanned
+         files carry an invisible OCR copy; both arrive here as duplicates. */
+      const seen = new Map();
+      const unique = [];
+      items.forEach(function (it) {
+        const key = it.text;
+        const at = seen.get(key);
+        if (at && at.some(function (p) { return Math.abs(p[0] - it.x) < 1.5 && Math.abs(p[1] - it.y) < 1.5; })) return;
+        if (at) at.push([it.x, it.y]); else seen.set(key, [[it.x, it.y]]);
+        unique.push(it);
       });
-      const lines = rows.map(function (r) {
-        r.parts.sort(function (p, q) { return p.x - q.x; });
-        let out = '', prev = null;
-        r.parts.forEach(function (p) {
-          if (prev && !/\s$/.test(out) && p.x - prev.x > 1) out += ' ';
-          out += p.text;
-          prev = p;
-        });
-        return out;
-      }).filter(function (l) { return l.trim(); });
+
+      // separate independent blocks before turning them into lines
+      const groups = xyCut(unique, 0);
+      const lines = [];
+      groups.forEach(function (g) { groupIntoLines(g).forEach(function (l) { lines.push(l); }); });
       if (lines.length) pagesOut.push(lines);
     }
 
     if (!pagesOut.length)
       throw new Error('No text found. If this PDF is a scan, the pages are images and hold no text to convert.');
 
-    // Be honest when a file's fonts carry no recoverable encoding, rather than
-    // emitting nonsense that looks like text.
     const all = pagesOut.map(function (p) { return p.join(' '); }).join(' ');
     const ctrl = (all.match(CONTROLish) || []).length;
     if (all.length > 40 && ctrl / all.length > 0.15)
