@@ -153,10 +153,9 @@
 
   let FONT = null, fontBytes = null, saveTimer = null;
 
-  /* The size the ribbon shows when the caret is in ordinary text. Text with
-     no size of its own inherits it, so changing it moves the whole document
-     - including anything inside a text box or a table cell. */
-  let baseSize = NTEditor.DEFAULT_SIZE;
+  /* The size the ribbon is set to. Everything typed from now on takes it,
+     wherever the caret is; nothing already written is touched by it. */
+  let typingSize = NTEditor.DEFAULT_SIZE;
 
   /* ---------- boot ---------- */
   function b64ToBytes(b64) {
@@ -183,6 +182,7 @@
     startSession();   // archive last session, then open a clean page
 
     el.editor.addEventListener('input', () => { refresh(); scheduleSave(); });
+    wireTypingSize();
     el.editor.addEventListener('keyup', syncToolbarState);
     el.editor.addEventListener('mouseup', syncToolbarState);
     el.editor.addEventListener('keyup', syncSizeBox);
@@ -195,7 +195,8 @@
     el.editor.addEventListener('paste', e => {
       e.preventDefault();
       const t = (e.clipboardData || window.clipboardData).getData('text/plain');
-      document.execCommand('insertText', false, t);
+      insertTextSized(t);
+      refresh(); scheduleSave();
     });
 
     ['change','input'].forEach(ev => {
@@ -420,7 +421,8 @@
 
     /* --- Insert: text --- */
     el.textBoxBtn.addEventListener('click', () => {
-      insertBlockHTML('<div class="textbox" style="width:340px;height:120px"><div>' +
+      insertBlockHTML('<div class="textbox" style="width:340px;height:120px;' +
+        'font-size:' + typingSize + 'px"><div>' +
         '[Grab your reader&rsquo;s attention with a great quote, or use this space ' +
         'to emphasise a key point.]</div></div><div><br></div>', 'div');
       const boxes = el.editor.querySelectorAll('.textbox');
@@ -837,36 +839,86 @@
   }
 
   /* ---------- font size ----------
-   * The size the ribbon shows is the size the next character will have.
+   * The size works like a pen. Setting it with nothing selected changes what
+   * gets written from that point on - anywhere the caret goes, body or text
+   * box or table cell - and leaves everything already on the page alone.
    *
-   * With nothing selected the number is the document base size: a CSS
-   * variable on the page drives the screen, and parseDocument and the PDF
-   * layout read the same number, so text that carries no size of its own
-   * looks the same everywhere - body, text box, table cell.
+   * It is applied as each character arrives rather than up front, so no
+   * empty placeholder spans are left lying in the document and a size chosen
+   * long before it is used still takes effect.
    *
-   * With text selected the number becomes a local override on just that
-   * text, written through execCommand so Ctrl+Z can undo it. This is not
+   * Selecting text first is the other half: that restyles just the selection,
+   * written through execCommand so Ctrl+Z can undo it. Neither path uses
    * execCommand("fontSize"), which only understands the legacy 1-7 scale and
-   * caused the earlier sizing bugs.
+   * caused the earliest sizing bugs.
    */
-  /* Set the size everything unstyled inherits. One CSS variable drives the
-     screen; parseDocument and the PDF layout read the same number. */
-  function setBaseSize(px, o) {
-    baseSize = Math.max(MIN_SIZE, Math.min(MAX_SIZE, Math.round(+px || 0) || NTEditor.DEFAULT_SIZE));
-    el.editor.style.setProperty('--base-size', baseSize + 'px');
-    el.sizeInput.value = baseSize;
-    if (o && o.quiet) return;
-    refresh(); scheduleSave();
+  function setTypingSize(px) {
+    typingSize = Math.max(MIN_SIZE, Math.min(MAX_SIZE,
+                          Math.round(+px || 0) || NTEditor.DEFAULT_SIZE));
+    el.sizeInput.value = typingSize;
+    scheduleSave();
   }
 
-  /* Show the size the next character will really have: the override the
-     caret sits in, or the base size when there is none. Left alone while the
-     box itself has focus, so it never fights what is being typed into it. */
+  /* The size the caret is standing in, or null when it is not in the body. */
+  function caretSize() {
+    const s = window.getSelection();
+    if (!s || !s.rangeCount) return null;
+    let n = s.getRangeAt(0).startContainer;
+    if (n.nodeType !== 1) n = n.parentNode;
+    if (!n || !el.editor.contains(n)) return null;
+    return Math.round(parseFloat(getComputedStyle(n).fontSize));
+  }
+
+  /* Apply the typing size at the moment of typing. Only the first character
+     after a change needs wrapping: the caret is left inside the new span, so
+     the rest of the word matches already and flows straight in. */
+  /* Put text in at the typing size. When the caret already sits at that size
+     the browser handles it; otherwise the run is wrapped once and the caret is
+     left inside the wrapper, so the rest of the word flows straight in. */
+  function insertTextSized(text) {
+    const at = caretSize();
+    if (at === null || at === typingSize) {
+      document.execCommand('insertText', false, text);
+      return;
+    }
+    document.execCommand('insertHTML', false,
+      '<span style="font-size:' + typingSize + 'px" data-pc-typing="1">' +
+      esc(text) + '</span>');
+    const m = el.editor.querySelector('[data-pc-typing]');
+    if (m) {
+      m.removeAttribute('data-pc-typing');
+      const t = m.firstChild;
+      if (t) {
+        const r = document.createRange();
+        r.setStart(t, t.length); r.collapse(true);
+        const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      }
+    }
+  }
+
+  function wireTypingSize() {
+    el.editor.addEventListener('beforeinput', e => {
+      if (e.inputType !== 'insertText' || !e.data) return;
+      const at = caretSize();
+      if (at === null || at === typingSize) return;
+      e.preventDefault();
+      insertTextSized(e.data);
+      refresh(); scheduleSave();
+    });
+  }
+
+  /* With a caret the box shows the size the next character will have, which
+     is the typing size. With text selected it shows that text's size, so it
+     is clear what is about to be changed. */
   function syncSizeBox() {
     if (document.activeElement === el.sizeInput) return;
-    const st = capturedStyle();
-    const n = st && st.size;
-    el.sizeInput.value = (n && n >= MIN_SIZE && n <= MAX_SIZE) ? n : baseSize;
+    const s = window.getSelection();
+    if (s && s.rangeCount && !s.getRangeAt(0).collapsed) {
+      const st = capturedStyle();
+      const n = st && st.size;
+      if (n && n >= MIN_SIZE && n <= MAX_SIZE) { el.sizeInput.value = n; return; }
+    }
+    el.sizeInput.value = typingSize;
   }
 
   function applySize(px) {
@@ -883,9 +935,11 @@
     if (region === el.pageHeader) { el.headerSize.value = px; refresh(); scheduleSave(); return; }
     if (region === el.pageFooter) { el.footerSize.value = px; refresh(); scheduleSave(); return; }
 
-    /* Nothing selected: this is a choice about the document, not about a few
-       characters, so make it the base size and let it hold everywhere. */
-    if (!live || live.collapsed || !region) { setBaseSize(px); return; }
+    /* Nothing selected: this sets the pen. It applies to everything typed
+       from here on and leaves what is already written alone. */
+    if (!live || live.collapsed || !region) { setTypingSize(px); return; }
+
+    setTypingSize(px);
 
     const range = live;
 
@@ -916,7 +970,7 @@
   }
 
   function insertTable(rows, cols, withHeader) {
-    let html = '<table class="pc-table"><tbody>';
+    let html = '<table class="pc-table" style="font-size:' + typingSize + 'px"><tbody>';
     for (let r = 0; r < rows; r++) {
       html += '<tr>';
       for (let c = 0; c < cols; c++) {
@@ -953,7 +1007,7 @@
     return {
       pageW: land ? ps.h : ps.w, pageH: land ? ps.w : ps.h,
       marginL: m, marginR: m, marginTop: m, marginBottom: m,
-      baseSize: baseSize,
+      baseSize: NTEditor.DEFAULT_SIZE,
       lineSpacing: +el.spacing.value,
       indentPt: 26, paraSpacing: 0,
       label: ps.label + (land ? ' landscape' : '')
@@ -961,7 +1015,7 @@
   }
 
   function currentDoc() {
-    const doc = NTEditor.parseDocument(el.editor, baseSize);
+    const doc = NTEditor.parseDocument(el.editor, NTEditor.DEFAULT_SIZE);
     return NTEditor.foldDocument(FONT, doc, NTEngine.fold);
   }
 
@@ -1044,7 +1098,7 @@
 
   function snapshot(html) {
     return {
-      html: html, baseSize: baseSize,
+      html: html, typingSize: typingSize,
       headerHTML: el.pageHeader.innerHTML, footerHTML: el.pageFooter.innerHTML,
       page: el.pageSize.value, orient: el.orientation.value,
       rules: el.rules.checked, tracing: el.tracing.checked,
@@ -1110,7 +1164,7 @@
       if (s.headerText !== undefined) el.headerText.value = s.headerText || '';
       if (s.footerText !== undefined) el.footerText.value = s.footerText || '';
     }
-    if (s.baseSize) setBaseSize(s.baseSize, { quiet: true });
+    if (s.typingSize || s.baseSize) setTypingSize(s.typingSize || s.baseSize);
     if (s.page) el.pageSize.value = s.page;
     if (s.orient) el.orientation.value = s.orient;
     el.rules.checked = !!s.rules; el.tracing.checked = !!s.tracing;
