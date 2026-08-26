@@ -67,8 +67,11 @@
     const markStyle = para.runs[0] || { size: opts.baseSize, b: false, i: false };
     const markW = listMark ? runWidth(font, listMark, markStyle) + markStyle.size * LIST_GAP : 0;
 
-    const avail0 = colW - indent - markW;      // first line (after bullet)
-    const availN = colW - indent - markW;      // continuation lines align under text
+    // a drop cap pushes the lines it spans to the right of the big letter
+    const dropW = (opts.dropWidth || 0), dropLines = (opts.dropLines || 0);
+    const availFor = i => colW - indent - markW - (i < dropLines ? dropW : 0);
+    const avail0 = availFor(0);
+    const availN = availFor(1);
 
     const toks = tokenize(para);
     const lines = [];
@@ -84,7 +87,7 @@
     for (let t = 0; t < toks.length; t++) {
       const tok = toks[t];
       let w = runWidth(font, tok.text, tok.style);
-      const avail = first ? avail0 : availN;
+      const avail = availFor(lines.length);
 
       // a single word longer than the column must be split by character
       if (!tok.space && w > avail && !cur.length) {
@@ -112,13 +115,14 @@
 
     // vertical metrics per line, from the largest style present
     const asc = font.ASC / font.UPEM, desc = font.DESC / font.UPEM, gap = font.GAP / font.UPEM;
+    lines.forEach((ln, li) => { ln.dropIndent = li < dropLines ? dropW : 0; });
     for (const ln of lines) {
       let maxSize = opts.baseSize;
       for (const it of ln.items) maxSize = Math.max(maxSize, it.style.size);
       ln.ascent = asc * maxSize;
       ln.descent = -desc * maxSize;
       ln.height = (asc - desc + gap) * maxSize * (opts.lineSpacing || 1);
-      ln.indent = indent;
+      ln.indent = indent + (ln.dropIndent || 0);
       ln.markW = markW;
     }
     if (lines.length) { lines[0].listMark = listMark; lines[0].markStyle = markStyle; }
@@ -286,12 +290,43 @@
         continue;
       }
 
-      const para = block;
+      let para = block;
       if (para.list === 'ol') olCount++; else olCount = 0;
+
+      // WordArt: large outlined lettering rather than plain text
+      let wa = null;
+      if (para.wordart) {
+        wa = { size: opts.baseSize * 2.2 };
+        para.runs = para.runs.map(r => Object.assign({}, r,
+          { size: wa.size, outline: true, color: r.color || 'rgb(43,87,154)' }));
+      }
+
+      // Drop cap: split the first letter out and reserve space beside it
+      let cap = null;
+      if (para.dropcap) {
+        const runs = para.runs.filter(r => (r.text || '').length);
+        const firstRun = runs[0];
+        const ch = firstRun && firstRun.text.trim()[0];
+        if (ch) {
+          const capSize = (firstRun.size || opts.baseSize) * 3;
+          const capStyle = Object.assign({}, firstRun, { size: capSize });
+          const capW = runWidth(font, ch, capStyle) + capSize * 0.08;
+          cap = { ch: ch, style: capStyle, w: capW, size: capSize };
+          // remove that character from the flowing text
+          const idx = firstRun.text.indexOf(ch);
+          para = Object.assign({}, para, {
+            runs: para.runs.map(r => r === firstRun
+              ? Object.assign({}, r, { text: r.text.slice(0, idx) + r.text.slice(idx + 1) })
+              : r)
+          });
+        }
+      }
       const lines = layoutParagraph(font, para, colW, {
         baseSize: opts.baseSize, lineSpacing: opts.lineSpacing,
-        indentPt: opts.indentPt, listIndex: olCount
+        indentPt: opts.indentPt, listIndex: olCount,
+        dropWidth: cap ? cap.w : 0, dropLines: cap ? 2 : 0
       });
+      if (cap && lines.length) lines[0].dropCap = cap;
       lines.forEach((ln, idx) => {
         positionLine(ln, colW, para.align || 'left', idx === lines.length - 1);
         if (y + ln.height > usableH && page.length) newPage();

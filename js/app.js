@@ -316,6 +316,7 @@
     });
 
     /* --- format painter --- */
+    el.fmtPainter.addEventListener('mousedown', e => e.preventDefault());
     el.fmtPainter.addEventListener('click', () => {
       if (painter) { painter = null; el.fmtPainter.classList.remove('on'); return; }
       painter = capturedStyle();
@@ -548,9 +549,19 @@
   function capturedStyle() {
     const b = currentBlock();
     const sel = getSelection();
-    if (!sel.rangeCount) return null;
-    let n = sel.getRangeAt(0).startContainer;
-    if (n.nodeType === 3) n = n.parentNode;
+    let range = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
+    if (!range || !regionOf(range.commonAncestorContainer)) range = savedRange;
+    if (!range) return null;
+    // resolve to the element that actually carries the formatting: a selection
+    // made over a whole block starts on the block itself, whose own computed
+    // style says nothing about the <b>/<span> inside it
+    let n = range.startContainer;
+    if (n.nodeType === 1) {
+      const at = n.childNodes[range.startOffset] || n.firstChild || n;
+      const walker = document.createTreeWalker(at.nodeType === 1 ? at : n, NodeFilter.SHOW_TEXT, null);
+      const t = (at.nodeType === 3 ? at : walker.nextNode());
+      if (t) n = t.parentNode;
+    } else n = n.parentNode;
     const cs = getComputedStyle(n);
     return {
       bold: +cs.fontWeight >= 600, italic: cs.fontStyle === 'italic',
@@ -564,12 +575,25 @@
     const sel = getSelection();
     if (!sel.rangeCount || sel.isCollapsed) return;
     focusEditor();
-    document.execCommand('removeFormat');
-    if (st.bold) document.execCommand('bold');
-    if (st.italic) document.execCommand('italic');
-    if (st.underline) document.execCommand('underline');
-    if (st.color) document.execCommand('foreColor', false, st.color);
-    if (st.size) { el.sizeInput.value = st.size; el.sizeInput.dispatchEvent(new Event('change', { bubbles: true })); }
+
+    /* execCommand('removeFormat') collapses the selection in some browsers,
+       which silently made every following command a no-op — the size still
+       landed only because applySize recovers the remembered range. Re-apply
+       the target range before each step so they all act on the same text. */
+    const target = sel.getRangeAt(0).cloneRange();
+    const reselect = () => {
+      const s = window.getSelection();
+      s.removeAllRanges();
+      s.addRange(target.cloneRange());
+    };
+    const run = (cmd, val) => { reselect(); document.execCommand(cmd, false, val === undefined ? null : val); };
+
+    run('removeFormat');
+    if (st.bold) run('bold');
+    if (st.italic) run('italic');
+    if (st.underline) run('underline');
+    if (st.color) run('foreColor', st.color);
+    if (st.size) { reselect(); el.sizeInput.value = st.size; el.sizeInput.dispatchEvent(new Event('change', { bubbles: true })); }
     if (st.align) {
       const b = currentBlock();
       if (b) b.style.textAlign = st.align;
@@ -1256,6 +1280,13 @@
             drawRun(P, page, font, KEY, ln.listMark, ln.markStyle,
                     o.marginL + ln.indent, baseY, tracing);
           }
+          if (ln.dropCap) {
+            // the big letter sits at the left edge, its baseline dropped so it
+            // spans the lines that were indented to make room for it
+            const c = ln.dropCap;
+            drawRun(P, page, font, KEY, c.ch, c.style,
+                    o.marginL + (ln.indent - c.w), baseY - c.size * 0.46, tracing);
+          }
           drawLineItems(P, page, font, KEY, ln, o.marginL, baseY, tracing);
         }
       });
@@ -1348,9 +1379,9 @@
     const c = NTEditor.rgbToArr(style.color);
     const ops = [P.pushGraphicsState()];
 
-    if (tracing) {
+    if (tracing || style.outline) {
       ops.push(P.setTextRenderingMode(P.TextRenderingMode.Outline),
-               P.setLineWidth(Math.max(0.35, size * 0.022)),
+               P.setLineWidth(Math.max(0.35, size * (style.outline ? 0.035 : 0.022))),
                P.setStrokingRgbColor(c[0], c[1], c[2]));
     } else if (style.b) {
       ops.push(P.setTextRenderingMode(P.TextRenderingMode.FillAndOutline),

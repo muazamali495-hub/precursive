@@ -138,7 +138,11 @@
       const emit = () => {
         const imgHost = el.querySelector && el.querySelector(':scope > img, :scope > .img-wrap');
         if (imgHost) { const ib = imageBlockFrom(imgHost); if (ib) doc.push(ib); bucket = []; return; }
-        doc.push({ align: alignOf(el), list: list || null, level: level || 0,
+        const ml = parseFloat((el.style && el.style.marginLeft) || 0) || 0;
+        const extra = ml > 8 ? Math.round(ml / 40) : 0;
+        doc.push({ align: alignOf(el), list: list || null, level: (level || 0) + extra,
+                   dropcap: !!(el.classList && el.classList.contains('dropcap')),
+                   wordart: !!(el.classList && el.classList.contains('wordart')),
                    shade: (el.style && el.style.backgroundColor && !isTransparent(el.style.backgroundColor))
                           ? el.style.backgroundColor : null,
                    runs: bucket.length ? bucket : [{ text: '', size: baseSize }] });
@@ -178,6 +182,7 @@
           else if (k.includes('rule')) doc.push({ type: 'rule' });
           else doc.push({ type: 'pagebreak' });
         }
+        else if (tag === 'BLOCKQUOTE') descend(child, list, (level || 0) + 1);
         else if (tag === 'UL') descend(child, 'ul', (level || 0) + (list ? 1 : 0));
         else if (tag === 'OL') descend(child, 'ol', (level || 0) + (list ? 1 : 0));
         else if (tag === 'LI') pushPara(child, list, level);
@@ -196,7 +201,7 @@
           else if (child.querySelector(':scope > img, :scope > .img-wrap')) {
             const ib = imageBlockFrom(child); if (ib) doc.push(ib);
           }
-          else pushPara(child, null, 0);
+          else pushPara(child, null, level || 0);
         }
       }
       // loose text directly inside the editor (before the first block)
@@ -248,7 +253,8 @@
         type: 'table', cols: b.cols,
         rows: b.rows.map(row => row.map(c => ({ header: c.header, paras: foldBlocks(c.paras) })))
       };
-      return { align: b.align, list: b.list, level: b.level, shade: b.shade, runs: foldRuns(b.runs) };
+      return { align: b.align, list: b.list, level: b.level, shade: b.shade,
+               dropcap: b.dropcap, wordart: b.wordart, runs: foldRuns(b.runs) };
     });
 
     return { doc: foldBlocks(doc), changes, lost };
