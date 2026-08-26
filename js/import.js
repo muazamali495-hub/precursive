@@ -237,42 +237,93 @@
       } catch (e) {}
       if (!content) continue;
 
-      // walk the text operators
-      const lines = [];
-      let cur = '', activeMap = null, twoByte = false;
-      const tokens = content.match(/\/[A-Za-z0-9#+\-.]+|\[[^\]]*\]|\([^\\)]*(?:\\.[^\\)]*)*\)|<[0-9A-Fa-f\s]*>|-?[\d.]+|[A-Za-z'"*]+/g) || [];
+      /* Walk the text operators, recording WHERE each piece of text lands.
+         Real exporters position every line with its own Tm inside a single
+         BT/ET block, so breaking lines on Td/T* alone merges the whole page
+         into one string. Grouping by y position is what actually recovers
+         the lines, and it also fixes reading order. */
+      const items = [];                       // { x, y, text }
+      let tm = [1,0,0,1,0,0], tlm = [1,0,0,1,0,0], leading = 0;
+      let activeMap = null, twoByte = false, fontSize = 12;
+      const setTm = n => { tm = n.slice(); tlm = n.slice(); };
+      const translate = (tx, ty) => {
+        // tlm = [1 0 0 1 tx ty] x tlm
+        tlm = [tlm[0], tlm[1], tlm[2], tlm[3],
+               tx * tlm[0] + ty * tlm[2] + tlm[4],
+               tx * tlm[1] + ty * tlm[3] + tlm[5]];
+        tm = tlm.slice();
+      };
+      const emit = txt => {
+        if (!txt) return;
+        items.push({ x: tm[4], y: tm[5], text: txt, size: Math.abs(tm[3] || 1) * fontSize });
+      };
+
+      const tokens = content.match(new RegExp("\\/[A-Za-z0-9#+\\-.]+|\\[[^\\]]*\\]|\\([^\\\\)]*(?:\\\\.[^\\\\)]*)*\\)|<[0-9A-Fa-f\\s]*>|-?[\\d.]+|[A-Za-z'\"*]+", 'g')) || [];
       let stack = [];
-      const push = t => { if (t) cur += t; };
       for (const tk of tokens) {
-        if (tk[0] === '/' || tk[0] === '[' || tk[0] === '(' || tk[0] === '<' || /^-?[\d.]+$/.test(tk)) { stack.push(tk); continue; }
-        if (tk === 'Tf') {
-          const nm = stack.filter(x => x[0] === '/').pop();
-          if (nm) { const k = nm.slice(1); activeMap = maps.get(k) || null; twoByte = !!activeMap; }
-          stack = []; continue;
-        }
-        if (tk === 'Tj' || tk === "'" || tk === '"') {
-          const s = stack.filter(x => x[0] === '(' || x[0] === '<').pop();
-          if (s) push(s[0] === '(' ? decodePdfString(pdfLiteral(s.slice(1, -1)), activeMap, false)
-                                   : decodePdfString(hexToRaw(s), activeMap, twoByte));
-          if (tk !== 'Tj') { lines.push(cur); cur = ''; }
-          stack = []; continue;
-        }
-        if (tk === 'TJ') {
-          const arr = stack.filter(x => x[0] === '[').pop() || '';
-          for (const m of arr.matchAll(/\(([^\\)]*(?:\\.[^\\)]*)*)\)|<([0-9A-Fa-f\s]*)>|(-?[\d.]+)/g)) {
-            if (m[1] !== undefined) push(decodePdfString(pdfLiteral(m[1]), activeMap, false));
-            else if (m[2] !== undefined) push(decodePdfString(hexToRaw('<' + m[2] + '>'), activeMap, twoByte));
-            else if (m[3] !== undefined && parseFloat(m[3]) < -120) push(' ');  // wide gap = space
+        if (tk[0] === '/' || tk[0] === '[' || tk[0] === '(' || tk[0] === '<' || new RegExp("^-?[\\d.]+$").test(tk)) { stack.push(tk); continue; }
+        switch (tk) {
+          case 'BT': setTm([1,0,0,1,0,0]); stack = []; break;
+          case 'Tf': {
+            const nm = stack.filter(x => x[0] === '/').pop();
+            const sz = parseFloat(stack[stack.length - 1]);
+            if (!isNaN(sz)) fontSize = sz;
+            if (nm) { const k = nm.slice(1); activeMap = maps.get(k) || null; twoByte = !!activeMap; }
+            stack = []; break;
           }
-          stack = []; continue;
+          case 'TL': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) leading = v; stack = []; break; }
+          case 'Tm': { const n = stack.slice(-6).map(Number); if (n.length === 6 && n.every(v => !isNaN(v))) setTm(n); stack = []; break; }
+          case 'Td': { const n = stack.slice(-2).map(Number); if (n.length === 2) translate(n[0], n[1]); stack = []; break; }
+          case 'TD': { const n = stack.slice(-2).map(Number); if (n.length === 2) { leading = -n[1]; translate(n[0], n[1]); } stack = []; break; }
+          case 'T*': translate(0, -leading); stack = []; break;
+          case 'Tj': case "'": case '"': {
+            if (tk !== 'Tj') translate(0, -leading);
+            const str = stack.filter(x => x[0] === '(' || x[0] === '<').pop();
+            if (str) emit(str[0] === '(' ? decodePdfString(pdfLiteral(str.slice(1, -1)), activeMap, false)
+                                        : decodePdfString(hexToRaw(str), activeMap, twoByte));
+            stack = []; break;
+          }
+          case 'TJ': {
+            const arr = stack.filter(x => x[0] === '[').pop() || '';
+            let piece = '';
+            for (const m of arr.matchAll(new RegExp("\\(([^\\\\)]*(?:\\\\.[^\\\\)]*)*)\\)|<([0-9A-Fa-f\\s]*)>|(-?[\\d.]+)", 'g'))) {
+              if (m[1] !== undefined) piece += decodePdfString(pdfLiteral(m[1]), activeMap, false);
+              else if (m[2] !== undefined) piece += decodePdfString(hexToRaw('<' + m[2] + '>'), activeMap, twoByte);
+              else if (m[3] !== undefined) {
+                // a large negative adjustment is how most producers write a space
+                const adj = parseFloat(m[3]);
+                if (adj <= -100 && piece && !/\s$/.test(piece)) piece += ' ';
+              }
+            }
+            emit(piece);
+            stack = []; break;
+          }
+          default: stack = [];
         }
-        if (tk === 'Td' || tk === 'TD' || tk === 'T*' || tk === 'ET') {
-          if (cur.trim()) { lines.push(cur); cur = ''; }
-          stack = []; continue;
-        }
-        stack = [];
       }
-      if (cur.trim()) lines.push(cur);
+      if (!items.length) continue;
+
+      /* Group into lines by y (tolerance scaled to the text size), then order
+         top-to-bottom and left-to-right, inserting a space where two pieces on
+         the same line were positioned apart. */
+      const tol = Math.max(2, Math.min(6, (items[0].size || 12) * 0.4));
+      const rows = [];
+      for (const it of items.slice().sort((p, q) => q.y - p.y || p.x - q.x)) {
+        const row = rows.find(r => Math.abs(r.y - it.y) <= tol);
+        if (row) { row.parts.push(it); row.y = (row.y + it.y) / 2; }
+        else rows.push({ y: it.y, parts: [it] });
+      }
+      const lines = rows.map(r => {
+        r.parts.sort((p, q) => p.x - q.x);
+        let out = '';
+        let prev = null;
+        for (const p of r.parts) {
+          if (prev && !/\s$/.test(out) && p.x - prev.x > 1) out += ' ';
+          out += p.text;
+          prev = p;
+        }
+        return out;
+      }).filter(l => l.trim());
       if (lines.length) pagesOut.push(lines);
     }
 

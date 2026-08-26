@@ -245,11 +245,31 @@
       }
     });
 
+    const cv2 = document.getElementById('convertFileBtn2');
+    if (cv2) cv2.addEventListener('click', () => { if (window.NTConvert) NTConvert.open(); });
     el.convert.addEventListener('click', makePDF);
     el.sample.addEventListener('click', loadSample);
     el.clear.addEventListener('click', () => {
       if (!el.editor.textContent.trim() || confirm('Clear the document?')) {
         el.editor.innerHTML = '<div><br></div>'; refresh(); scheduleSave(); el.editor.focus();
+      }
+    });
+    // the standalone Convert tool reuses this app's font, layout and PDF code
+    if (global_NTConvertReady()) NTConvert.wire({
+      font: () => FONT,
+      loadIntoEditor: async (html, kind) => {
+        await archiveCurrentIfAny();
+        blankDocument();
+        el.editor.innerHTML = html || '<div><br></div>';
+        selectTextBox(null);
+        refresh(); scheduleSave();
+        reportStatus('Converted ' + (kind || 'file') + ' to NT Pre-Cursive');
+      },
+      exportHtmlAsPdf: async (html, baseName) => {
+        const holder = el.editor.innerHTML;
+        el.editor.innerHTML = html || '<div><br></div>';
+        try { await makePDF({ filenameBase: baseName }); }
+        finally { el.editor.innerHTML = holder; refresh(); }
       }
     });
     el.year.textContent = new Date().getFullYear();
@@ -413,6 +433,10 @@
                   el.tableHeader.checked);
       closeMenus();
     });
+  }
+
+  function global_NTConvertReady() {
+    return typeof NTConvert === 'object' && NTConvert && typeof NTConvert.wire === 'function';
   }
 
   /* ---------- ribbon helpers ---------- */
@@ -1158,7 +1182,7 @@
   }
 
   /* ---------- PDF ---------- */
-  async function makePDF() {
+  async function makePDF(exportOpts) {
     const { doc } = currentDoc();
     if (!NTEditor.docText(doc).trim()) return;
 
@@ -1292,7 +1316,9 @@
       });
 
       const bytes = await pdf.save();
-      download(bytes, filename(doc));
+      download(bytes, (exportOpts && exportOpts.filenameBase)
+        ? String(exportOpts.filenameBase).replace(/[^\w \-]/g, "").trim().replace(/\s+/g, "-").toLowerCase() + "-precursive.pdf"
+        : filename(doc));
       setStatus('Done — ' + pages.length + ' page' + (pages.length > 1 ? 's' : '') +
                 ', ' + Math.round(bytes.length / 1024) + ' KB');
     } catch (e) {

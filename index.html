@@ -7,8 +7,8 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=24">
-<link rel="stylesheet" href="css/ribbon.css?v=24">
+<link rel="stylesheet" href="css/style.css?v=28">
+<link rel="stylesheet" href="css/ribbon.css?v=28">
 </head>
 <body>
 
@@ -256,6 +256,7 @@
 
     <div class="rb-group">
       <div class="rb-body">
+        <button class="rb-big accent" id="convertFileBtn" type="button"><span class="ic">✍</span><span>Convert<br>a file</span></button>
         <button class="rb-big" id="importBtn" type="button"><span class="ic">📥</span><span>Open file</span></button>
         <input id="importInput" type="file" accept=".txt,.md,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
         <div class="rb-col">
@@ -361,6 +362,7 @@
   </span>
   <span class="sb-right">
     <span id="status" class="status" role="status" aria-live="polite"></span>
+    <button id="convertFileBtn2" class="secondary" type="button" title="Convert a Word or PDF file">Convert a file…</button>
     <button id="convert" class="primary" type="button">
       <span class="label">Convert to NT Pre-Cursive PDF</span>
       <span class="spin" aria-hidden="true"></span>
@@ -369,14 +371,65 @@
 </footer>
 <span id="year" hidden></span>
 
+
+<div id="cvOverlay" class="cv-overlay" hidden>
+  <div class="cv-modal" role="dialog" aria-modal="true" aria-label="Convert a file to NT Pre-Cursive">
+    <div class="cv-head">
+      <h2>Convert to NT&nbsp;Pre-Cursive</h2>
+      <button id="cvClose" class="cv-x" type="button" aria-label="Close">✕</button>
+    </div>
+
+    <div id="cvDrop" class="cv-drop">
+      <div class="cv-dropicon">📄</div>
+      <p class="cv-droptitle">Drop a Word or PDF file here</p>
+      <p class="cv-dropsub">Its text is rewritten in the NT&nbsp;Pre-Cursive handwriting font.</p>
+      <button id="cvPick" class="cv-btn primary" type="button">Choose a file</button>
+      <input id="cvInput" type="file" hidden
+             accept=".docx,.pdf,.txt,.md,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+      <p class="cv-types">Word (.docx) · PDF · text (.txt, .md)</p>
+    </div>
+
+    <div id="cvBusy" class="cv-busy" hidden>
+      <div class="cv-spin"></div>
+      <p>Reading the file…</p>
+      <p id="cvBusyName" class="cv-dim"></p>
+    </div>
+
+    <div id="cvResult" class="cv-result" hidden>
+      <div class="cv-summary">
+        <div>
+          <p class="cv-name" id="cvResName"></p>
+          <p class="cv-dim"><span id="cvResKind"></span> · <span id="cvResStats"></span></p>
+        </div>
+        <button id="cvAnother" class="cv-btn ghost" type="button">Choose another</button>
+      </div>
+      <div id="cvResNote" class="cv-note" hidden></div>
+      <p class="cv-prevlabel">Preview</p>
+      <div id="cvPreview" class="cv-preview"></div>
+      <div class="cv-actions">
+        <button id="cvEdit" class="cv-btn ghost" type="button">Open in the editor</button>
+        <button id="cvDownload" class="cv-btn primary" type="button">Download handwriting PDF</button>
+      </div>
+    </div>
+
+    <div id="cvError" class="cv-error" hidden>
+      <div class="cv-dropicon">⚠️</div>
+      <p class="cv-droptitle">That file could not be converted</p>
+      <p id="cvErrorMsg" class="cv-dim"></p>
+      <button id="cvTryAgain" class="cv-btn primary" type="button">Try another file</button>
+    </div>
+  </div>
+</div>
+
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=24"></script>
-<script src="js/engine.js?v=24"></script>
-<script src="js/layout.js?v=24"></script>
-<script src="js/editor.js?v=24"></script>
-<script src="js/import.js?v=24"></script>
-<script src="js/app.js?v=24"></script>
+<script src="js/font-data.js?v=28"></script>
+<script src="js/engine.js?v=28"></script>
+<script src="js/layout.js?v=28"></script>
+<script src="js/editor.js?v=28"></script>
+<script src="js/import.js?v=28"></script>
+<script src="js/convert.js?v=28"></script>
+<script src="js/app.js?v=28"></script>
 <script>
 (function () {
   // ribbon tab switching
