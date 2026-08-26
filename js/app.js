@@ -16,15 +16,17 @@
      first; localStorage remains the fallback for browsers without it. If both
      refuse, the user is told rather than left to discover it later. */
   const STORE = (function () {
-    const DB_NAME = 'precursive', STORE_NAME = 'docs', KEY = 'doc-v2';
+    const DB_NAME = 'precursive', STORE_NAME = 'docs', HIST = 'history', KEY = 'doc-v2';
     let dbPromise = null;
     function open() {
       if (dbPromise) return dbPromise;
       dbPromise = new Promise((res, rej) => {
         let req;
-        try { req = indexedDB.open(DB_NAME, 1); } catch (e) { return rej(e); }
+        try { req = indexedDB.open(DB_NAME, 2); } catch (e) { return rej(e); }
         req.onupgradeneeded = () => {
-          if (!req.result.objectStoreNames.contains(STORE_NAME)) req.result.createObjectStore(STORE_NAME);
+          const db = req.result;
+          if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME);
+          if (!db.objectStoreNames.contains(HIST)) db.createObjectStore(HIST, { keyPath: 'id' });
         };
         req.onsuccess = () => res(req.result);
         req.onerror = () => rej(req.error);
@@ -68,6 +70,57 @@
           } catch (e) {}
         }
         try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; }
+      },
+
+      /* ---- document memory: every session's work is kept here ---- */
+      async archive(entry) {
+        const db = await open();
+        if (!db || !db.objectStoreNames.contains(HIST)) return { ok: false };
+        try {
+          await new Promise((res, rej) => {
+            const tx = db.transaction(HIST, 'readwrite');
+            tx.objectStore(HIST).put(entry);
+            tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+            tx.onabort = () => rej(tx.error || new Error('aborted'));
+          });
+          return { ok: true };
+        } catch (e) { return { ok: false, error: e }; }
+      },
+      async list() {
+        const db = await open();
+        if (!db || !db.objectStoreNames.contains(HIST)) return [];
+        try {
+          const all = await new Promise((res, rej) => {
+            const tx = db.transaction(HIST, 'readonly');
+            const rq = tx.objectStore(HIST).getAll();
+            rq.onsuccess = () => res(rq.result || []);
+            rq.onerror = () => rej(rq.error);
+          });
+          // newest first, and keep the list light (no html in the summary)
+          return all.sort((x, y) => (y.at || 0) - (x.at || 0));
+        } catch (e) { return []; }
+      },
+      async remove(id) {
+        const db = await open();
+        if (!db || !db.objectStoreNames.contains(HIST)) return;
+        try {
+          await new Promise((res) => {
+            const tx = db.transaction(HIST, 'readwrite');
+            tx.objectStore(HIST).delete(id);
+            tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+          });
+        } catch (e) {}
+      },
+      async clearHistory() {
+        const db = await open();
+        if (!db || !db.objectStoreNames.contains(HIST)) return;
+        try {
+          await new Promise((res) => {
+            const tx = db.transaction(HIST, 'readwrite');
+            tx.objectStore(HIST).clear();
+            tx.oncomplete = res; tx.onerror = res; tx.onabort = res;
+          });
+        } catch (e) {}
       }
     };
   })();
@@ -94,7 +147,8 @@
    'linkBtn','unlinkBtn','headerBtn','footerBtn','pageNumBtn','textBoxBtn',
    'wordArtBtn','dropCapBtn','dateBtn','symbolBtn','symbolMenu','symbolGrid',
    'headerMenu','headerText','headerAlign','headerSize','headerRule',
-   'footerMenu','footerText','footerAlign','footerSize','pageHeader','pageFooter','tbOverlay']
+   'footerMenu','footerText','footerAlign','footerSize','pageHeader','pageFooter','tbOverlay',
+   'newDocBtn','saveMemBtn','importBtn','importInput','memoryBtn','memoryMenu','memoryList','memoryClear']
    .forEach(id => el[id] = document.getElementById(id));
 
   let FONT = null, fontBytes = null, saveTimer = null;
@@ -121,7 +175,7 @@
 
     wireToolbar();
     wireTextBoxes();
-    restore();   // async; refreshes when done
+    startSession();   // archive last session, then open a clean page
 
     el.editor.addEventListener('input', () => { refresh(); scheduleSave(); });
     el.editor.addEventListener('keyup', syncToolbarState);
@@ -152,6 +206,45 @@
     el.footerText.addEventListener('input', () => {
       el.pageFooter.textContent = el.footerText.value; refresh(); scheduleSave();
     });
+    /* ---- File tab: new / memory / import ---- */
+    el.newDocBtn.addEventListener('click', async () => {
+      const filed = await archiveCurrentIfAny();
+      blankDocument(); refresh(); doSave();
+      reportStatus(filed ? 'Filed to memory — new blank document' : 'New blank document');
+    });
+    el.saveMemBtn.addEventListener('click', async () => {
+      const filed = await archiveCurrentIfAny();
+      reportStatus(filed ? 'Saved to memory' : 'Nothing to save yet', !filed);
+      if (filed && !el.memoryMenu.hidden) renderMemoryList();
+    });
+    popToggle(el.memoryBtn, el.memoryMenu, renderMemoryList);
+    el.memoryClear.addEventListener('click', async () => {
+      if (!confirm('Remove every document from memory? This cannot be undone.')) return;
+      await STORE.clearHistory(); renderMemoryList(); setStatus('Memory cleared');
+    });
+
+    el.importBtn.addEventListener('click', () => el.importInput.click());
+    el.importInput.addEventListener('change', async () => {
+      const f = el.importInput.files && el.importInput.files[0];
+      el.importInput.value = '';
+      if (!f) return;
+      setStatus('Reading ' + f.name + '…');
+      try {
+        const res = await NTImport.fileToHtml(f);
+        await archiveCurrentIfAny();     // don't lose what is open
+        blankDocument();
+        el.editor.innerHTML = res.html || '<div><br></div>';
+        selectTextBox(null);
+        refresh(); scheduleSave();
+        const { changes, lost } = currentDoc();
+        const nLost = [...lost.values()].reduce((x, y) => x + y, 0);
+        reportStatus('Converted ' + res.kind + ' to NT Pre-Cursive' +
+                     (nLost ? ' — ' + nLost + ' character(s) this font cannot draw were replaced' : ''));
+      } catch (e) {
+        setStatus('Could not open that file: ' + e.message, true, true);
+      }
+    });
+
     el.convert.addEventListener('click', makePDF);
     el.sample.addEventListener('click', loadSample);
     el.clear.addEventListener('click', () => {
@@ -822,14 +915,21 @@
   }
 
   const esc = s => s.replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-  let stickyError = false;
+  let stickyError = false, holdUntil = 0;
   function setStatus(m, err, sticky) {
     // a *build* error must survive the routine "Saved" toast; a storage-save
     // error is not sticky, so a later successful save clears it
-    if (stickyError && !err && m === 'Saved') return;
+    if (m === 'Saved' && (stickyError || Date.now() < holdUntil)) return;
     stickyError = !!err && !!sticky;
     el.status.textContent = m || '';
     el.status.classList.toggle('err', !!err);
+  }
+
+  /* Show a result the user needs to actually read, and protect it from the
+     autosave toast for a few seconds. */
+  function reportStatus(m, err) {
+    setStatus(m, err);
+    holdUntil = Date.now() + 6000;
   }
 
   /* ---------- autosave ---------- */
@@ -889,13 +989,20 @@
     }
   }
 
-  async function restore() {
-    let s = null;
-    try { s = JSON.parse((await STORE.load()) || 'null'); } catch (e) {}
-    if (!s || typeof s !== 'object') { el.editor.innerHTML = '<div><br></div>'; return; }
-    el.editor.innerHTML = s.html || '<div><br></div>';
-    if (s.headerHTML) el.pageHeader.innerHTML = s.headerHTML;
-    if (s.footerHTML) el.pageFooter.innerHTML = s.footerHTML;
+  /* Each visit starts on a clean page, the way opening a word processor does.
+     Whatever was in progress last time is not thrown away: it is filed into
+     the document memory (File tab) where it can be reopened. Page setup
+     preferences are kept, since those are settings rather than work. */
+  function applySnapshot(s, opts) {
+    if (!s || typeof s !== 'object') return;
+    const withContent = !opts || opts.content !== false;
+    if (withContent) {
+      el.editor.innerHTML = s.html || '<div><br></div>';
+      el.pageHeader.innerHTML = s.headerHTML || '<div><br></div>';
+      el.pageFooter.innerHTML = s.footerHTML || '<div><br></div>';
+      if (s.headerText !== undefined) el.headerText.value = s.headerText || '';
+      if (s.footerText !== undefined) el.footerText.value = s.footerText || '';
+    }
     if (s.page) el.pageSize.value = s.page;
     if (s.orient) el.orientation.value = s.orient;
     el.rules.checked = !!s.rules; el.tracing.checked = !!s.tracing;
@@ -903,18 +1010,113 @@
     if (s.spacing) el.spacing.value = s.spacing;
     if (s.margin) el.margin.value = s.margin;
     if (s.wsName) el.wsName.value = s.wsName;
-    if (s.headerText) el.headerText.value = s.headerText;
     if (s.headerAlign) el.headerAlign.value = s.headerAlign;
     if (s.headerSize) el.headerSize.value = s.headerSize;
     if (s.headerRule !== undefined) el.headerRule.checked = !!s.headerRule;
-    if (s.footerText) el.footerText.value = s.footerText;
     if (s.footerAlign) el.footerAlign.value = s.footerAlign;
     if (s.footerSize) el.footerSize.value = s.footerSize;
     pageNumbers = !!s.pageNumbers;
     if (el.pageNumBtn) el.pageNumBtn.classList.toggle('on', pageNumbers);
-    if (el.editor.querySelector('img[data-dropped]'))
-      setStatus('Some pictures could not be saved last time and are missing.', true);
+  }
+
+  function snapshotTitle(s) {
+    const t = document.createElement('div');
+    t.innerHTML = (s && s.html) || '';
+    const line = (t.textContent || '').replace(/​/g, '').split(String.fromCharCode(10))
+      .map(x => x.trim()).find(Boolean) || '';
+    return line.slice(0, 60) || 'Untitled document';
+  }
+
+  function snapshotWords(s) {
+    const t = document.createElement('div');
+    t.innerHTML = (s && s.html) || '';
+    return ((t.textContent || '').match(/S+/g) || []).length;
+  }
+
+  function hasContent(s) {
+    if (!s) return false;
+    const t = document.createElement('div');
+    t.innerHTML = (s.html || '') + (s.headerHTML || '') + (s.footerHTML || '');
+    return !!(t.textContent || '').replace(/​/g, '').trim() || /<img|<table/i.test(s.html || '');
+  }
+
+  function blankDocument() {
+    el.editor.innerHTML = '<div><br></div>';
+    el.pageHeader.innerHTML = '<div><br></div>';
+    el.pageFooter.innerHTML = '<div><br></div>';
+    el.headerText.value = ''; el.footerText.value = '';
+    selectTextBox(null);
+  }
+
+  async function startSession() {
+    let s = null;
+    try { s = JSON.parse((await STORE.load()) || 'null'); } catch (e) {}
+
+    // keep the previous session's page setup, but not its content
+    applySnapshot(s, { content: false });
+
+    if (hasContent(s)) {
+      await STORE.archive({
+        id: 'doc-' + (s.at || Date.now()) + '-' + Math.floor(performance.now()),
+        at: s.at || Date.now(),
+        title: snapshotTitle(s),
+        words: snapshotWords(s),
+        snapshot: s
+      });
+    }
+    blankDocument();
+    // the fresh blank page becomes the new working document
+    doSave();
     refresh();
+  }
+
+  /* File tab: the document memory */
+  async function openDocFromMemory(id) {
+    const items = await STORE.list();
+    const hit = items.find(x => x.id === id);
+    if (!hit) { setStatus('That document is no longer in memory', true); return; }
+    // file the current work first so nothing is lost by opening another
+    await archiveCurrentIfAny();
+    applySnapshot(hit.snapshot, { content: true });
+    selectTextBox(null);
+    refresh(); scheduleSave();
+    reportStatus('Opened "' + hit.title + '"');
+    closeMenus();
+  }
+
+  async function archiveCurrentIfAny() {
+    const cur = snapshot(el.editor.innerHTML);
+    if (!hasContent(cur)) return false;
+    await STORE.archive({
+      id: 'doc-' + Date.now() + '-' + Math.floor(performance.now()),
+      at: Date.now(), title: snapshotTitle(cur), words: snapshotWords(cur), snapshot: cur
+    });
+    return true;
+  }
+
+  async function renderMemoryList() {
+    const items = await STORE.list();
+    if (!items.length) {
+      el.memoryList.innerHTML = '<p class="memempty">Nothing saved yet. Your work is filed here automatically when you open the app again.</p>';
+      return;
+    }
+    el.memoryList.innerHTML = items.map(it => {
+      const d = new Date(it.at || 0);
+      const when = isNaN(d.getTime()) ? '' :
+        d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' +
+        d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+      return '<div class="memitem" data-id="' + esc(it.id) + '">' +
+        '<button class="memopen" type="button" data-id="' + esc(it.id) + '">' +
+          '<span class="memttl">' + esc(it.title || 'Untitled') + '</span>' +
+          '<span class="memmeta">' + (it.words || 0) + ' words · ' + esc(when) + '</span>' +
+        '</button>' +
+        '<button class="memdel" type="button" data-del="' + esc(it.id) + '" title="Remove">✕</button>' +
+      '</div>';
+    }).join('');
+    el.memoryList.querySelectorAll('.memopen').forEach(b =>
+      b.addEventListener('click', () => openDocFromMemory(b.dataset.id)));
+    el.memoryList.querySelectorAll('.memdel').forEach(b =>
+      b.addEventListener('click', async () => { await STORE.remove(b.dataset.del); renderMemoryList(); }));
   }
 
   function loadSample() {

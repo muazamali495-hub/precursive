@@ -7,8 +7,8 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=18">
-<link rel="stylesheet" href="css/ribbon.css?v=18">
+<link rel="stylesheet" href="css/style.css?v=20">
+<link rel="stylesheet" href="css/ribbon.css?v=20">
 </head>
 <body>
 
@@ -245,6 +245,39 @@
   </div>
 
   <!-- ---------------- LAYOUT ---------------- -->
+  <div class="rb-panel" data-panel="file">
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="newDocBtn" type="button"><span class="ic">📄</span><span>New</span></button>
+        <button class="rb-big" id="saveMemBtn" type="button"><span class="ic">💾</span><span>Save to<br>memory</span></button>
+      </div>
+      <div class="rb-label">Document</div>
+    </div>
+
+    <div class="rb-group">
+      <div class="rb-body">
+        <button class="rb-big" id="importBtn" type="button"><span class="ic">📥</span><span>Open file</span></button>
+        <input id="importInput" type="file" accept=".txt,.md,.docx,.pdf,text/plain,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+        <div class="rb-col">
+          <span class="rb-note">Word (.docx), PDF,<br>text (.txt, .md)</span>
+        </div>
+      </div>
+      <div class="rb-label">Import</div>
+    </div>
+
+    <div class="rb-group grow">
+      <div class="rb-body">
+        <button class="rb-big" id="memoryBtn" type="button"><span class="ic">🗂</span><span>Memory</span></button>
+        <div id="memoryMenu" class="popmenu wide" hidden>
+          <p class="popttl">Saved documents</p>
+          <div id="memoryList" class="memlist"></div>
+          <button id="memoryClear" class="popbtn ghosty" type="button">Clear all memory</button>
+        </div>
+      </div>
+      <div class="rb-label">Memory</div>
+    </div>
+  </div>
+
   <div class="rb-panel" data-panel="layout">
     <div class="rb-group">
       <div class="rb-body rb-rows">
@@ -338,17 +371,17 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=18"></script>
-<script src="js/engine.js?v=18"></script>
-<script src="js/layout.js?v=18"></script>
-<script src="js/editor.js?v=18"></script>
-<script src="js/app.js?v=18"></script>
+<script src="js/font-data.js?v=20"></script>
+<script src="js/engine.js?v=20"></script>
+<script src="js/layout.js?v=20"></script>
+<script src="js/editor.js?v=20"></script>
+<script src="js/import.js?v=20"></script>
+<script src="js/app.js?v=20"></script>
 <script>
 (function () {
   // ribbon tab switching
   document.querySelectorAll('.rb-tab[data-tab]').forEach(function (t) {
     t.addEventListener('click', function () {
-      if (t.dataset.tab === 'file') return;
       document.querySelectorAll('.rb-tab').forEach(x => x.classList.remove('active'));
       document.querySelectorAll('.rb-panel').forEach(x => x.classList.remove('active'));
       t.classList.add('active');

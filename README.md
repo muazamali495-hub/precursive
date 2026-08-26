@@ -14,6 +14,28 @@ worksheet header.
 Everything runs in the visitor's browser. There is no server, no build step and no
 external request at runtime — which is what makes it free to host forever.
 
+## Document memory
+
+The app opens on a clean page every time, the way a word processor does.
+Whatever was in progress last time is not discarded: it is filed into the
+document memory (**File → Memory**), where it can be reopened, and removed
+individually or all at once. Storage is IndexedDB, so photo-heavy documents
+are kept too.
+
+## Importing Word and PDF files
+
+**File → Open file** converts an existing document into the handwriting face.
+
+- **.docx** — unpacked by hand. A .docx is a ZIP, and browsers can inflate raw
+  deflate streams natively, so no ZIP library is needed. Bold, italic,
+  underline, strikethrough, font size, colour, highlight, alignment and bullet
+  lists are carried across.
+- **.pdf** — text is recovered from the page content streams using pdf-lib
+  (already vendored), decoding through each font's /ToUnicode CMap where one
+  exists. Scanned PDFs hold images rather than text and are reported as such
+  rather than importing silently as blank.
+- **.txt / .md** — taken as-is, with a Windows-1252 fallback.
+
 ## Run locally
 
 Open `index.html` in a browser. That's it — the font is embedded as base64, so it
