@@ -159,6 +159,66 @@
     return map;
   }
 
+
+  /* A compact Adobe Glyph List: enough to decode the names real producers emit. */
+  const AGL = (function () {
+    const m = new Map();
+    const ascii = ('space exclam quotedbl numbersign dollar percent ampersand quotesingle ' +
+      'parenleft parenright asterisk plus comma hyphen period slash zero one two three four ' +
+      'five six seven eight nine colon semicolon less equal greater question at').split(' ');
+    ascii.forEach((n, i) => m.set(n, String.fromCharCode(32 + i)));
+    for (let c = 65; c <= 90; c++) m.set(String.fromCharCode(c), String.fromCharCode(c));
+    for (let c = 97; c <= 122; c++) m.set(String.fromCharCode(c), String.fromCharCode(c));
+    const tail = { bracketleft: 91, backslash: 92, bracketright: 93, asciicircum: 94,
+      underscore: 95, grave: 96, braceleft: 123, bar: 124, braceright: 125, asciitilde: 126,
+      quoteleft: 0x2018, quoteright: 0x2019, quotedblleft: 0x201C, quotedblright: 0x201D,
+      endash: 0x2013, emdash: 0x2014, bullet: 0x2022, ellipsis: 0x2026, fi: 0xFB01, fl: 0xFB02,
+      sterling: 0xA3, euro: 0x20AC, degree: 0xB0, nbspace: 32, hyphenminus: 45 };
+    Object.keys(tail).forEach(k => m.set(k, String.fromCharCode(tail[k])));
+    return m;
+  })();
+
+  function glyphNameToChar(name) {
+    if (!name) return '';
+    if (AGL.has(name)) return AGL.get(name);
+    let mm = /^uni([0-9A-Fa-f]{4})$/.exec(name);
+    if (mm) return String.fromCharCode(parseInt(mm[1], 16));
+    mm = /^u([0-9A-Fa-f]{4,6})$/.exec(name);
+    if (mm) return String.fromCodePoint(parseInt(mm[1], 16));
+    // names like g23 / cid23 / index23 carry no meaning on their own
+    return '';
+  }
+
+  /* Standard Macintosh glyph ordering. Subset fonts frequently use the glyph
+     index as the character code; in that ordering 'space' is glyph 3, so text
+     read as raw bytes comes out shifted by exactly 29. */
+  const MAC_ORDER = ('.notdef .null nonmarkingreturn space exclam quotedbl numbersign dollar ' +
+    'percent ampersand quotesingle parenleft parenright asterisk plus comma hyphen period slash ' +
+    'zero one two three four five six seven eight nine colon semicolon less equal greater ' +
+    'question at A B C D E F G H I J K L M N O P Q R S T U V W X Y Z bracketleft backslash ' +
+    'bracketright asciicircum underscore grave a b c d e f g h i j k l m n o p q r s t u v w x ' +
+    'y z braceleft bar braceright asciitilde').split(' ');
+
+  function macOrderMap() {
+    const m = new Map();
+    MAC_ORDER.forEach((n, i) => { const c = glyphNameToChar(n); if (c) m.set(i, c); });
+    return m;
+  }
+
+  /* Was this text decoded with the wrong encoding? Two reliable signals:
+     correctly decoded text never contains raw control characters, and real
+     prose is roughly a third vowels. A Caesar-shifted decode looks like
+     letters, so a letter-ratio test alone never catches it. */
+  function looksGarbled(text) {
+    const s = String(text || "").slice(0, 4000);
+    if (s.length < 12) return false;
+    if (new RegExp("[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F]").test(s)) return true;
+    const letters = (s.match(/[A-Za-z]/g) || []).length;
+    if (letters < 20) return false;
+    const vowels = (s.match(/[aeiouAEIOU]/g) || []).length;
+    return vowels / letters < 0.12;
+  }
+
   function decodePdfString(raw, map, twoByte) {
     let out = '';
     if (twoByte) {
@@ -195,26 +255,75 @@
     for (const page of doc.getPages()) {
       const node = page.node;
 
-      // font code -> unicode maps for this page
-      const maps = new Map();
+      /* Work out, per font, how its byte codes map to characters.
+         Order of preference:
+           1. /ToUnicode CMap            - authoritative when present
+           2. /Encoding /Differences     - glyph names, resolved via the AGL
+           3. standard Macintosh glyph order - for subset fonts whose codes are
+              glyph indices (space lands on glyph 3, which is why such files
+              come out uniformly shifted by 29 when read as raw bytes)
+           4. Latin-1                    - ordinary simple fonts
+         Also records whether each font uses 1- or 2-byte codes, which depends
+         on the font type and NOT on whether a ToUnicode happens to exist. */
+      const fontInfo = new Map();   // name -> { map, twoByte }
       try {
-        const res = node.Resources && node.Resources();
+        let res = null;
+        try { res = node.Resources && node.Resources(); } catch (e) {}
+        if (!res) {
+          // Resources are inheritable: walk up to the parent Pages node
+          let up = node;
+          for (let i = 0; i < 8 && up && !res; i++) {
+            const parent = up.get && up.get(PDFName.of('Parent'));
+            up = parent ? ctx.lookup(parent) : null;
+            if (up && up.get) { const r = up.get(PDFName.of('Resources')); if (r) res = ctx.lookup(r); }
+          }
+        }
         const fonts = res && res.lookup ? res.lookup(PDFName.of('Font')) : null;
         if (fonts && fonts.entries) {
           for (const [key, ref] of fonts.entries()) {
+            const name = key.asString().replace(/^\//, '');
+            let map = null, twoByte = false;
             try {
               const f = ctx.lookup(ref);
+              const sub = f && f.get && f.get(PDFName.of('Subtype'));
+              const subName = sub && sub.asString ? sub.asString() : '';
+              twoByte = /Type0/.test(subName);
+
+              // 1. ToUnicode
               const tu = f && f.get && f.get(PDFName.of('ToUnicode'));
-              if (!tu) continue;
-              const st = ctx.lookup(tu);
-              if (!st || !st.getContents) continue;
-              let raw = st.getContents();
-              try {
-                const ds = new DecompressionStream('deflate');
-                raw = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(ds)).arrayBuffer());
-              } catch (e) { /* may be uncompressed */ }
-              maps.set(key.asString(), parseToUnicode(new TextDecoder('latin1').decode(raw)));
+              if (tu) {
+                const st = ctx.lookup(tu);
+                if (st && st.getContents) {
+                  let raw = st.getContents();
+                  try {
+                    const ds = new DecompressionStream('deflate');
+                    raw = new Uint8Array(await new Response(new Blob([raw]).stream().pipeThrough(ds)).arrayBuffer());
+                  } catch (e) { /* often stored uncompressed */ }
+                  const m = parseToUnicode(new TextDecoder('latin1').decode(raw));
+                  if (m && m.size) map = m;
+                }
+              }
+
+              // 2. /Encoding /Differences
+              if (!map) {
+                const encRef = f && f.get && f.get(PDFName.of('Encoding'));
+                const enc = encRef ? ctx.lookup(encRef) : null;
+                const diffRef = enc && enc.get && enc.get(PDFName.of('Differences'));
+                const diffs = diffRef ? ctx.lookup(diffRef) : null;
+                if (diffs && diffs.asArray) {
+                  const m = new Map();
+                  let code = 0;
+                  for (const item of diffs.asArray()) {
+                    const v = ctx.lookup(item);
+                    if (v && typeof v.asNumber === 'function') { code = v.asNumber(); continue; }
+                    const gname = v && v.asString ? v.asString().replace(/^\//, '') : null;
+                    if (gname) { const ch = glyphNameToChar(gname); if (ch) m.set(code, ch); code++; }
+                  }
+                  if (m.size) map = m;
+                }
+              }
             } catch (e) {}
+            fontInfo.set(name, { map: map, twoByte: twoByte });
           }
         }
       } catch (e) {}
@@ -244,7 +353,7 @@
          the lines, and it also fixes reading order. */
       const items = [];                       // { x, y, text }
       let tm = [1,0,0,1,0,0], tlm = [1,0,0,1,0,0], leading = 0;
-      let activeMap = null, twoByte = false, fontSize = 12;
+      let activeMap = null, twoByte = false, fontSize = 12, activeFont = null;
       const setTm = n => { tm = n.slice(); tlm = n.slice(); };
       const translate = (tx, ty) => {
         // tlm = [1 0 0 1 tx ty] x tlm
@@ -268,7 +377,13 @@
             const nm = stack.filter(x => x[0] === '/').pop();
             const sz = parseFloat(stack[stack.length - 1]);
             if (!isNaN(sz)) fontSize = sz;
-            if (nm) { const k = nm.slice(1); activeMap = maps.get(k) || null; twoByte = !!activeMap; }
+            if (nm) {
+              const k = nm.slice(1);
+              activeFont = fontInfo.get(k) || null;
+              activeMap = activeFont ? activeFont.map : null;
+              // byte width follows the font type, never the presence of a map
+              twoByte = !!(activeFont && activeFont.twoByte);
+            }
             stack = []; break;
           }
           case 'TL': { const v = parseFloat(stack[stack.length - 1]); if (!isNaN(v)) leading = v; stack = []; break; }
@@ -313,7 +428,7 @@
         if (row) { row.parts.push(it); row.y = (row.y + it.y) / 2; }
         else rows.push({ y: it.y, parts: [it] });
       }
-      const lines = rows.map(r => {
+      let lines = rows.map(r => {
         r.parts.sort((p, q) => p.x - q.x);
         let out = '';
         let prev = null;
@@ -324,7 +439,25 @@
         }
         return out;
       }).filter(l => l.trim());
-      if (lines.length) pagesOut.push(lines);
+      if (lines.length) {
+        // If a font gave us no encoding at all, raw bytes may really be glyph
+        // indices. Retry through the standard Macintosh ordering and keep
+        // whichever reading actually looks like words.
+        /* If the reading looks wrong, the byte codes may really be glyph
+           indices. Re-read through the standard Macintosh ordering and keep
+           that version only if it is genuinely better. */
+        if (looksGarbled(lines.join(" "))) {
+          const mo = macOrderMap();
+          const retry = lines.map(function (l) {
+            return l.split("").map(function (ch) {
+              const c = mo.get(ch.charCodeAt(0));
+              return c === undefined ? ch : c;
+            }).join("");
+          });
+          if (!looksGarbled(retry.join(" "))) lines = retry;
+        }
+        pagesOut.push(lines);
+      }
     }
 
     if (!pagesOut.length)
