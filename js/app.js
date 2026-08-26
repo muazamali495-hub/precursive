@@ -605,7 +605,7 @@
     let out = text;
     if (mode === 'upper') out = text.toUpperCase();
     else if (mode === 'lower') out = text.toLowerCase();
-    else if (mode === 'title') out = text.replace(/\b\w/g, c => c.toUpperCase());
+    else if (mode === 'title') out = text.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
     else if (mode === 'sentence') out = text.toLowerCase().replace(/(^\s*\w|[.!?]\s+\w)/g, c => c.toUpperCase());
     else if (mode === 'toggle') out = [...text].map(c =>
       c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()).join('');
@@ -1192,7 +1192,7 @@
   function snapshotWords(s) {
     const t = document.createElement('div');
     t.innerHTML = (s && s.html) || '';
-    return ((t.textContent || '').match(/S+/g) || []).length;
+    return ((t.textContent || '').match(/\S+/g) || []).length;
   }
 
   function hasContent(s) {
