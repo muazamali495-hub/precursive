@@ -368,3 +368,11 @@ button { font:inherit; cursor:pointer; }
   .statusbar { padding-block:2px; font-size:11px; gap:6px; }
   .statusbar #stats { flex:none; }
 }
+
+/* A picture sized for the page can be wider than a phone screen. Let it scale
+   down to fit, and let the height follow, so it keeps its shape on screen
+   while the printed size stays whatever it was given. */
+@media (max-width:760px) {
+  .editor .img-wrap { height:auto !important; }   /* picture wider than the screen */
+  .editor .img-wrap img { height:auto; }
+}

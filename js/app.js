@@ -691,6 +691,14 @@
   /* Insert an image as a resizable wrapper. If a text box is currently
      selected, the image goes inside that box and flows with its text;
      otherwise it is placed as its own block in the document. */
+  /* The printable column, in the px the editor works in. Anything sized for
+     the page has to be measured against this rather than against the window,
+     or the same document comes out differently on a phone and a laptop. */
+  function pageColumnPx() {
+    const o = opts();
+    return Math.max(120, Math.round((o.pageW - o.marginL - o.marginR) / 0.75));
+  }
+
   function insertImage(src, natW, natH) {
     // target the selected box, or the box the caret is currently inside
     let box = (activeBox && el.editor.contains(activeBox)) ? activeBox : null;
@@ -704,7 +712,7 @@
       }
     }
     const room = box ? Math.max(60, (box.clientWidth || 300) - 24)
-                     : (Math.max(120, el.editor.clientWidth - 8) || 480);
+                     : pageColumnPx();
     let w = natW || 320, h = natH || 240;
     if (w > room) { h = Math.round(h * room / w); w = Math.round(room); }
     const html = '<span class="img-wrap" contenteditable="false" style="width:' + w + 'px;height:' + h +
@@ -822,11 +830,9 @@
         const dir = h.dataset.dir;
         const start = { x: ev.clientX, y: ev.clientY,
                         w: activeBox.offsetWidth, h: activeBox.offsetHeight };
-        // Clamp to the page width, but only trust a measurement that looks
-        // like a real laid-out page. A hidden or not-yet-composited view can
-        // report a few pixels, which would otherwise squash the box.
-        const measured = el.editor.clientWidth;
-        const maxW = measured > 200 ? measured : 4000;
+        // Clamp to the printable column. Measuring the window instead meant a
+        // box could never be dragged past about half the page on a phone.
+        const maxW = pageColumnPx();
         const move = m => {
           if (m.pointerId !== ev.pointerId) return;
           const dx = m.clientX - start.x, dy = m.clientY - start.y;
@@ -1030,6 +1036,12 @@
     };
   }
 
+  /* A page can be worth printing without carrying a single word - a photo,
+     a table, a text box, a set of writing lines. */
+  function hasDrawable() {
+    return !!el.editor.querySelector('img, table, .textbox, hr');
+  }
+
   function currentDoc() {
     const doc = NTEditor.parseDocument(el.editor, NTEditor.DEFAULT_SIZE);
     return NTEditor.foldDocument(FONT, doc, NTEngine.fold);
@@ -1071,7 +1083,7 @@
     if (activeBox && el.editor.contains(activeBox)) positionOverlay(); else if (activeBox) selectTextBox(null);
     el.editor.classList.toggle('tracing', el.tracing.checked);
     el.editor.style.setProperty('--ls', el.spacing.value);
-    el.convert.disabled = !text.trim();
+    el.convert.disabled = !text.trim() && !hasDrawable();
   }
 
   /* Mirror the running header and footer onto the on-screen page so the
@@ -1314,7 +1326,7 @@
   /* ---------- PDF ---------- */
   async function makePDF(exportOpts) {
     const { doc } = currentDoc();
-    if (!NTEditor.docText(doc).trim()) return;
+    if (!NTEditor.docText(doc).trim() && !hasDrawable()) return;
 
     el.convert.classList.add('busy'); el.convert.disabled = true;
     setStatus('Building your PDF…');

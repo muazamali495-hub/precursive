@@ -61,10 +61,13 @@
     if (!img) return null;
     const wrap = (img.closest && img.closest('.img-wrap')) || null;
     const m = wrap || img;
-    const w = (m.offsetWidth || parseFloat((wrap && wrap.style.width) || img.style.width) ||
-               img.naturalWidth || 300);
-    const h = (m.offsetHeight || parseFloat((wrap && wrap.style.height) || img.style.height) ||
-               img.naturalHeight || 200);
+    // The size the picture was given wins over the size it happens to be
+    // drawn at: a narrow screen scales it down to fit, and that must not
+    // shrink it on the printed page as well.
+    const styleW = parseFloat((wrap && wrap.style.width) || img.style.width || '');
+    const styleH = parseFloat((wrap && wrap.style.height) || img.style.height || '');
+    const w = (styleW || m.offsetWidth || img.naturalWidth || 300);
+    const h = (styleH || m.offsetHeight || img.naturalHeight || 200);
     return { type: 'image', src: img.getAttribute('src'), w: w, h: h };
   }
 
@@ -134,10 +137,9 @@
         else merged.push(r);
       }
       // a <br> splits into separate paragraphs
-      let bucket = [];
+      let bucket = [], emitted = 0;
       const emit = () => {
-        const imgHost = el.querySelector && el.querySelector(':scope > img, :scope > .img-wrap');
-        if (imgHost) { const ib = imageBlockFrom(imgHost); if (ib) doc.push(ib); bucket = []; return; }
+        emitted++;
         const ml = parseFloat((el.style && el.style.marginLeft) || 0) || 0;
         const extra = ml > 8 ? Math.round(ml / 40) : 0;
         doc.push({ align: alignOf(el), list: list || null, level: (level || 0) + extra,
@@ -148,8 +150,20 @@
                    runs: bucket.length ? bucket : [{ text: '', size: baseSize }] });
         bucket = [];
       };
+      /* Pictures wherever they sit in this block. execCommand wraps what it
+         inserts inside whatever the caret was in, so a photo is regularly a
+         level or two down from where it looks like it should be. */
+      const pics = el.querySelectorAll ? [].slice.call(el.querySelectorAll('img')) : [];
+
       for (const r of merged) { if (r.br) emit(); else bucket.push(r); }
-      emit();
+      // a block that holds only a picture should not also print a blank line,
+      // and a trailing break should not add one either
+      if (bucket.length || (!emitted && !pics.length)) emit();
+
+      pics.forEach(function (p) {
+        const ib = imageBlockFrom((p.closest && p.closest('.img-wrap')) || p);
+        if (ib) doc.push(ib);
+      });
     }
 
     /* A <table> becomes one block; each cell carries its own paragraph list,
@@ -198,9 +212,6 @@
         else if (BLOCK.test(tag)) {
           // execCommand wraps inserted things inside the current block
           if (child.querySelector(':scope > table, :scope > .textbox, :scope > hr')) descend(child, list, level);
-          else if (child.querySelector(':scope > img, :scope > .img-wrap')) {
-            const ib = imageBlockFrom(child); if (ib) doc.push(ib);
-          }
           else pushPara(child, null, level || 0);
         }
       }
