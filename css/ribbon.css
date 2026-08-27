@@ -5,7 +5,9 @@
   :root:not([data-theme="light"]) { --ribbon-bg:var(--surface); --ribbon-line:var(--line); --grp-label:var(--ink-faint); }
 }
 
-body { display:flex; flex-direction:column; height:100vh; overflow:hidden; margin:0; }
+/* dvh tracks the area actually on screen, so the tab strip and its actions
+   stay put when a phone shows or hides its address bar or keyboard. */
+body { display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; margin:0; }
 button { font:inherit; cursor:pointer; }
 :focus-visible { outline:2px solid #ffd966; outline-offset:1px; }
 
@@ -312,3 +314,57 @@ button { font:inherit; cursor:pointer; }
 .cv-error { padding:40px 22px; text-align:center; }
 .cv-error .cv-btn { margin-top:14px; }
 @media (max-width:560px){ .cv-modal { max-height:94vh; } .cv-actions .cv-btn { flex:1; } }
+
+/* ---------- always-reachable actions in the header ---------- */
+.rb-tabs { align-items:center; }
+.rb-tabscroll { display:flex; align-items:center; min-width:0; flex:1;
+  overflow-x:auto; overflow-y:hidden; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.rb-tabscroll::-webkit-scrollbar { display:none; }
+.rb-actions { display:flex; align-items:center; gap:6px; flex:none;
+  padding:4px 8px; background:var(--word-blue); }
+.rb-actions .primary, .rb-actions .secondary {
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+  border-radius:4px; padding:7px 12px; font-size:12.5px; line-height:1;
+  min-height:38px; cursor:pointer; border:1px solid transparent; }
+.rb-actions .primary { background:#fff; color:var(--word-blue); font-weight:700; }
+.rb-actions .primary:disabled { opacity:.55; cursor:default; }
+.rb-actions .secondary { background:rgba(255,255,255,.14); color:#fff;
+  border-color:rgba(255,255,255,.45); }
+.rb-actions .ic { font-size:14px; }
+.rb-actions .rb-plain { min-height:38px; padding:6px 10px; }
+
+/* ---------- narrow screens ---------- */
+@media (max-width:760px) {
+  /* every ribbon group reachable without sideways scrolling */
+  .rb-panel { flex-wrap:wrap; overflow-x:visible; max-height:38vh; overflow-y:auto; }
+  .rb-group { flex:0 0 auto; }
+  .rb-actions { width:100%; padding:5px 8px; }
+  .rb-actions .primary { flex:1; justify-content:center; }
+  .rb-actions .secondary { flex:0 0 auto; }
+  /* a finger needs a bigger target than a mouse pointer */
+  .rb-ic, .rb-small, .rb-big { min-height:34px; }
+}
+@media (max-width:420px) {
+  .rb-actions .secondary .txt { display:none; }
+  .rb-actions .primary .label { font-size:12px; }
+}
+
+/* ---------- touch-friendly text box handles ---------- */
+.tb-h { touch-action:none; }
+/* the visible dot stays small; the part a finger can hit does not */
+.tb-h::after { content:""; position:absolute; left:50%; top:50%;
+  width:34px; height:34px; transform:translate(-50%,-50%); }
+@media (pointer:coarse) {
+  .tb-h { width:15px; height:15px; margin:-8px 0 0 -8px; }
+  .editor .textbox { resize:none; }   /* the native grip cannot be touched */
+}
+
+/* ---------- short viewport: a phone with its keyboard open ---------- */
+@media (max-height:520px) {
+  .rb-panel { max-height:74px; padding-block:2px; }
+  .rb-group { padding-top:0; }
+  .rb-label { display:none; }          /* group names are the first thing to go */
+  .rb-big { flex-direction:row; gap:5px; min-width:0; }
+  .statusbar { padding-block:2px; font-size:11px; gap:6px; }
+  .statusbar #stats { flex:none; }
+}

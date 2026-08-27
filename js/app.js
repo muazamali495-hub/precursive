@@ -791,6 +791,12 @@
     });
 
     // clicking inside a box selects it; clicking anywhere else deselects
+    /* a tap selects a box too */
+    el.editor.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse') return;      // the mouse path handles itself
+      const box = e.target.closest && e.target.closest('.textbox');
+      selectTextBox(box || null);
+    });
     el.editor.addEventListener('mousedown', e => {
       const box = e.target.closest && e.target.closest('.textbox');
       if (box) selectTextBox(box);
@@ -804,10 +810,15 @@
     document.querySelector('.stage').addEventListener('scroll', positionOverlay);
     window.addEventListener('resize', positionOverlay);
 
+    /* Pointer events rather than mouse events: one code path covers a mouse,
+       a finger and a stylus. Mouse-only listeners meant the handles simply did
+       nothing on a phone. Capturing the pointer keeps the drag alive even if
+       the finger slides off the handle. */
     el.tbOverlay.querySelectorAll('.tb-h').forEach(h => {
-      h.addEventListener('mousedown', ev => {
+      h.addEventListener('pointerdown', ev => {
         if (!activeBox) return;
         ev.preventDefault(); ev.stopPropagation();
+        try { h.setPointerCapture(ev.pointerId); } catch (e) {}
         const dir = h.dataset.dir;
         const start = { x: ev.clientX, y: ev.clientY,
                         w: activeBox.offsetWidth, h: activeBox.offsetHeight };
@@ -817,6 +828,7 @@
         const measured = el.editor.clientWidth;
         const maxW = measured > 200 ? measured : 4000;
         const move = m => {
+          if (m.pointerId !== ev.pointerId) return;
           const dx = m.clientX - start.x, dy = m.clientY - start.y;
           let w = start.w, ht = start.h;
           if (dir.includes('e')) w = start.w + dx;
@@ -827,13 +839,17 @@
           activeBox.style.height = Math.max(40, Math.round(ht)) + 'px';
           positionOverlay();
         };
-        const up = () => {
-          document.removeEventListener('mousemove', move);
-          document.removeEventListener('mouseup', up);
+        const up = m => {
+          if (m && m.pointerId !== ev.pointerId) return;
+          h.removeEventListener('pointermove', move);
+          h.removeEventListener('pointerup', up);
+          h.removeEventListener('pointercancel', up);
+          try { h.releasePointerCapture(ev.pointerId); } catch (e) {}
           refresh(); scheduleSave();
         };
-        document.addEventListener('mousemove', move);
-        document.addEventListener('mouseup', up);
+        h.addEventListener('pointermove', move);
+        h.addEventListener('pointerup', up);
+        h.addEventListener('pointercancel', up);
       });
     });
   }

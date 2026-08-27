@@ -7,14 +7,15 @@
 <meta name="description" content="A Word-style editor for the NTPreCursive handwriting font. Format text, insert tables and pictures, add tracing outlines and guide lines, and download a PDF. Runs entirely in your browser.">
 <meta name="theme-color" content="#2b579a">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✍️</text></svg>">
-<link rel="stylesheet" href="css/style.css?v=40">
-<link rel="stylesheet" href="css/ribbon.css?v=40">
+<link rel="stylesheet" href="css/style.css?v=42">
+<link rel="stylesheet" href="css/ribbon.css?v=42">
 </head>
 <body>
 
 <!-- ===================== ribbon ===================== -->
 <div class="ribbon">
   <div class="rb-tabs">
+    <div class="rb-tabscroll">
     <button class="rb-tab file" type="button" data-tab="file">File</button>
     <button class="rb-tab active" type="button" data-tab="home">Home</button>
     <button class="rb-tab" type="button" data-tab="insert">Insert</button>
@@ -24,8 +25,18 @@
     <button class="rb-tab dim" type="button" disabled>Mailings</button>
     <button class="rb-tab dim" type="button" disabled>Review</button>
     <button class="rb-tab" type="button" data-tab="view">View</button>
+    </div>
     <span class="rb-tell">💡 Tell me what you want to do…</span>
-    <span class="rb-right"><button id="themeBtn" class="rb-plain" type="button" title="Light / dark">◐</button></span>
+  </div>
+  <div class="rb-actions">
+    <button id="convertFileBtn2" class="secondary" type="button" title="Convert a Word or PDF file">
+      <span class="ic" aria-hidden="true">📄</span><span class="txt">Convert a file</span>
+    </button>
+    <button id="convert" class="primary" type="button" title="Save this document as a NT Pre-Cursive PDF">
+      <span class="ic" aria-hidden="true">⬇</span><span class="label">Save as NT Pre-Cursive PDF</span>
+      <span class="spin" aria-hidden="true"></span>
+    </button>
+    <button id="themeBtn" class="rb-plain" type="button" title="Light / dark">◐</button>
   </div>
 
   <!-- ---------------- HOME ---------------- -->
@@ -362,11 +373,6 @@
   </span>
   <span class="sb-right">
     <span id="status" class="status" role="status" aria-live="polite"></span>
-    <button id="convertFileBtn2" class="secondary" type="button" title="Convert a Word or PDF file">Convert a file…</button>
-    <button id="convert" class="primary" type="button">
-      <span class="label">Convert to NT Pre-Cursive PDF</span>
-      <span class="spin" aria-hidden="true"></span>
-    </button>
   </span>
 </footer>
 <span id="year" hidden></span>
@@ -423,13 +429,13 @@
 
 <script src="vendor/pdf-lib.min.js"></script>
 <script src="vendor/fontkit.umd.min.js"></script>
-<script src="js/font-data.js?v=40"></script>
-<script src="js/engine.js?v=40"></script>
-<script src="js/layout.js?v=40"></script>
-<script src="js/editor.js?v=40"></script>
-<script src="js/import.js?v=40"></script>
-<script src="js/convert.js?v=40"></script>
-<script src="js/app.js?v=40"></script>
+<script src="js/font-data.js?v=42"></script>
+<script src="js/engine.js?v=42"></script>
+<script src="js/layout.js?v=42"></script>
+<script src="js/editor.js?v=42"></script>
+<script src="js/import.js?v=42"></script>
+<script src="js/convert.js?v=42"></script>
+<script src="js/app.js?v=42"></script>
 <script>
 (function () {
   // ribbon tab switching
